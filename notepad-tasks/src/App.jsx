@@ -41,6 +41,8 @@ export default function App() {
   const [noteContextMenu, setNoteContextMenu] = useState(null); // { noteId, x, y } for right-click "Attach to task"
   const [attachNoteToTaskId, setAttachNoteToTaskId] = useState(null); // when attaching a saved note from context menu
   const [expandedNoteId, setExpandedNoteId] = useState(null);
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteTitle, setEditingNoteTitle] = useState("");
   const [notepadTabs, setNotepadTabs] = useState([{ id: 1, title: "Untitled", content: "", savedNoteId: null }]);
   const [activeTabId, setActiveTabId] = useState(1);
   const [profiles, setProfiles] = useState([]);
@@ -873,7 +875,7 @@ export default function App() {
     const html = notes.trim();
     if (!html) return "";
     const temp = document.createElement("div");
-    temp.innerHTML = html;
+    temp.innerHTML = html.replace(/<br\s*\/?>/gi, "\n");
     return (temp.textContent || temp.innerText || "").trim();
   }
 
@@ -1172,10 +1174,11 @@ export default function App() {
 
   function openNoteInNotepad(note) {
     const existing = notepadTabs.find((t) => t.savedNoteId === note.id);
+    const title = note.title || note.content.split("\n")[0]?.slice(0, 60) || "Note";
+    const content = plainTextToHtml(note.content);
     if (existing) {
-      const content = plainTextToHtml(note.content);
       setNotepadTabs((prev) =>
-        prev.map((t) => (t.id === existing.id ? { ...t, content } : t))
+        prev.map((t) => (t.id === existing.id ? { ...t, title, content } : t))
       );
       setActiveTabId(existing.id);
       setNotes(content);
@@ -1183,24 +1186,42 @@ export default function App() {
       return;
     }
     const newId = Date.now();
-    const content = plainTextToHtml(note.content);
-    const newTab = { id: newId, title: "Note", content, savedNoteId: note.id };
+    const newTab = { id: newId, title, content, savedNoteId: note.id };
     setNotepadTabs((prev) => [...prev, newTab]);
     setActiveTabId(newId);
     setNotes(content);
     notepadInitializedRef.current = false;
   }
 
+  function startRenameNote(id, title) {
+    setEditingNoteId(id);
+    setEditingNoteTitle(title || "");
+  }
+
+  function saveRenameNote(id) {
+    setSavedNotes((prev) =>
+      prev.map((n) => {
+        if (n.id !== id) return n;
+        const newTitle = (editingNoteTitle || n.title || "").trim();
+        return { ...n, title: newTitle || n.content?.split("\n")[0]?.slice(0, 60) || "Untitled" };
+      })
+    );
+    setEditingNoteId(null);
+    setEditingNoteTitle("");
+  }
+
   function saveNoteAsStandalone() {
     const plainText = getNotepadPlainText();
     if (!plainText) return;
+    const activeTab = notepadTabs.find((t) => t.id === activeTabId);
+    const title = (activeTab?.title?.trim() || plainText.split("\n")[0]?.slice(0, 60) || "Untitled").trim();
     const newNote = {
       id: Date.now(),
+      title,
       content: plainText,
       createdAt: new Date().toISOString(),
     };
     setSavedNotes((prev) => [newNote, ...prev]);
-    const activeTab = notepadTabs.find((t) => t.id === activeTabId);
     if (activeTab) {
       setNotepadTabs((prev) =>
         prev.map((t) => (t.id === activeTabId ? { ...t, savedNoteId: newNote.id } : t))
@@ -1213,8 +1234,11 @@ export default function App() {
     const activeTab = notepadTabs.find((t) => t.id === activeTabId);
     if (!activeTab?.savedNoteId) return;
     const plainText = getNotepadPlainText();
+    const title = (activeTab?.title?.trim() || plainText.split("\n")[0]?.slice(0, 60) || "Untitled").trim();
     setSavedNotes((prev) =>
-      prev.map((n) => (n.id === activeTab.savedNoteId ? { ...n, content: plainText } : n))
+      prev.map((n) =>
+        n.id === activeTab.savedNoteId ? { ...n, title, content: plainText } : n
+      )
     );
   }
 
@@ -1478,8 +1502,9 @@ export default function App() {
             <div className="left-notes-header">Notes</div>
             <div className="left-notes-list">
               {savedNotes.map((note) => {
-                const title = note.content.split("\n")[0].slice(0, 60) || "(Empty)";
+                const displayTitle = note.title || note.content.split("\n")[0]?.slice(0, 60) || "(Empty)";
                 const isExpanded = expandedNoteId === note.id;
+                const isEditing = editingNoteId === note.id;
                 return (
                   <div
                     key={note.id}
@@ -1498,15 +1523,36 @@ export default function App() {
                       >
                         {isExpanded ? "▼" : "▶"}
                       </button>
-                      <span
-                        className="left-note-title"
-                        onClick={() => openNoteInNotepad(note)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openNoteInNotepad(note); }}
-                      >
-                        {title}{note.content.split("\n")[0].length > 60 ? "…" : ""}
-                      </span>
+                      {isEditing ? (
+                        <input
+                          type="text"
+                          className="left-note-title-input"
+                          value={editingNoteTitle}
+                          onChange={(e) => setEditingNoteTitle(e.target.value)}
+                          onBlur={() => saveRenameNote(note.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveRenameNote(note.id);
+                            if (e.key === "Escape") { setEditingNoteId(null); setEditingNoteTitle(""); }
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          className="left-note-title"
+                          onClick={() => openNoteInNotepad(note)}
+                          onDoubleClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            startRenameNote(note.id, note.title || note.content.split("\n")[0]?.slice(0, 60) || "");
+                          }}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openNoteInNotepad(note); }}
+                        >
+                          {displayTitle}{displayTitle.length > 60 ? "…" : ""}
+                        </span>
+                      )}
                       <button
                         type="button"
                         className="left-reflect-delete-btn"
