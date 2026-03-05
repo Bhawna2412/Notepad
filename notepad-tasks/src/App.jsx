@@ -84,6 +84,7 @@ export default function App() {
   const highlighterModeRef = useRef(highlighterMode);
   highlighterModeRef.current = highlighterMode;
   const goToTodayRequestedRef = useRef(false);
+  const hasLoadedFromStorageRef = useRef(false);
 
   const TASKS_STORAGE_KEY = "notepad_tasks_v1";
   const GROUPS_STORAGE_KEY = "notepad_groups_v1";
@@ -664,6 +665,7 @@ export default function App() {
       setActiveTabId(1);
       setTheme("light");
       setTemplates([]);
+      hasLoadedFromStorageRef.current = true;
       return;
     }
     setProfiles(savedProfiles);
@@ -676,6 +678,7 @@ export default function App() {
       localStorage.setItem(ACTIVE_PROFILE_KEY, String(firstId));
       loadProfileDataIntoState(firstId);
     }
+    hasLoadedFromStorageRef.current = true;
   }, []);
 
   // Auth state: when logged in, use Supabase data; when logged out, use local
@@ -704,9 +707,9 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Persist current profile data when app state changes
+  // Persist current profile data when app state changes (only after initial load to avoid overwriting saved data)
   useEffect(() => {
-    if (activeProfileId == null) return;
+    if (!hasLoadedFromStorageRef.current || activeProfileId == null) return;
     const data = {
       tasks,
       groups,
@@ -738,6 +741,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!hasLoadedFromStorageRef.current) return;
     if (profiles.length > 0) localStorage.setItem(PROFILE_LIST_KEY, JSON.stringify(profiles));
   }, [profiles]);
 
