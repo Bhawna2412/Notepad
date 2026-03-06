@@ -914,13 +914,36 @@ export default function App() {
     if (!notepadInitializedRef.current) {
       notepadEditorRef.current.innerHTML = notes;
       notepadInitializedRef.current = true;
+      // Sync back after browser may have normalized the DOM so we persist what's actually displayed
+      requestAnimationFrame(() => {
+        if (!notepadEditorRef.current) return;
+        const actual = notepadEditorRef.current.innerHTML;
+        if (actual !== notes) {
+          setNotes(actual);
+          setNotepadTabs((prev) =>
+            prev.map((t) => (t.id === activeTabId ? { ...t, content: actual } : t))
+          );
+        }
+      });
     }
-  }, [notes]);
+  }, [notes, activeTabId]);
 
   function execNotepadCommand(cmd, value = null) {
     notepadEditorRef.current?.focus();
     document.execCommand(cmd, false, value);
     if (notepadEditorRef.current) setNotes(notepadEditorRef.current.innerHTML);
+  }
+
+  function insertNotepadTable() {
+    const editor = notepadEditorRef.current;
+    if (!editor) return;
+    editor.focus();
+    const tableHtml = "<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\"><tr><td></td><td></td></tr><tr><td></td><td></td></tr></table>";
+    document.execCommand("insertHTML", false, tableHtml);
+    setNotes(editor.innerHTML);
+    setNotepadTabs((prev) =>
+      prev.map((t) => (t.id === activeTabId ? { ...t, content: editor.innerHTML } : t))
+    );
   }
 
   function normalizeHexInput(v) {
@@ -1132,6 +1155,28 @@ export default function App() {
     return plain.replace(/\n/g, "<br>");
   }
 
+  function isContentHtml(str) {
+    if (!str || typeof str !== "string") return false;
+    const trimmed = str.trim();
+    return trimmed.startsWith("<") && trimmed.includes(">");
+  }
+
+  function getPlainTextFromHtml(html) {
+    if (!html || !html.trim()) return "";
+    const temp = document.createElement("div");
+    const withNewlines = html
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<\/div>/gi, "\n")
+      .replace(/<\/tr>/gi, "\n")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<\/h[1-6]>/gi, "\n")
+      .replace(/<\/td>/gi, "\t")
+      .replace(/<\/th>/gi, "\t");
+    temp.innerHTML = withNewlines;
+    return (temp.textContent || temp.innerText || "").trim();
+  }
+
   function switchNotepadTab(tabId) {
     const tab = notepadTabs.find((t) => t.id === tabId);
     if (!tab) return;
@@ -1174,8 +1219,11 @@ export default function App() {
 
   function openNoteInNotepad(note) {
     const existing = notepadTabs.find((t) => t.savedNoteId === note.id);
-    const title = note.title || note.content.split("\n")[0]?.slice(0, 60) || "Note";
-    const content = plainTextToHtml(note.content);
+    const content = isContentHtml(note.content) ? note.content : plainTextToHtml(note.content);
+    const firstLine = isContentHtml(note.content)
+      ? getPlainTextFromHtml(note.content).split("\n")[0]?.slice(0, 60)
+      : note.content.split("\n")[0]?.slice(0, 60);
+    const title = note.title || firstLine || "Note";
     if (existing) {
       setNotepadTabs((prev) =>
         prev.map((t) => (t.id === existing.id ? { ...t, title, content } : t))
@@ -1198,27 +1246,45 @@ export default function App() {
     setEditingNoteTitle(title || "");
   }
 
+  function getNoteDisplayTitle(note) {
+    if (note.title) return note.title;
+    const raw = note.content || "";
+    const firstLine = isContentHtml(raw)
+      ? getPlainTextFromHtml(raw).split("\n")[0]?.slice(0, 60)
+      : raw.split("\n")[0]?.slice(0, 60);
+    return firstLine || "(Empty)";
+  }
+
   function saveRenameNote(id) {
+    const newTitle = (editingNoteTitle || "").trim();
+    const note = savedNotes.find((n) => n.id === id);
+    let resolvedTitle = newTitle || (note ? getNoteDisplayTitle(note) : "Untitled");
+    if (resolvedTitle === "(Empty)") resolvedTitle = "Untitled";
     setSavedNotes((prev) =>
-      prev.map((n) => {
-        if (n.id !== id) return n;
-        const newTitle = (editingNoteTitle || n.title || "").trim();
-        return { ...n, title: newTitle || n.content?.split("\n")[0]?.slice(0, 60) || "Untitled" };
-      })
+      prev.map((n) => (n.id !== id ? n : { ...n, title: resolvedTitle }))
+    );
+    setNotepadTabs((prev) =>
+      prev.map((t) => (t.savedNoteId === id ? { ...t, title: resolvedTitle } : t))
     );
     setEditingNoteId(null);
     setEditingNoteTitle("");
   }
 
+  function getNotepadHtmlForSave() {
+    if (notepadEditorRef.current) return notepadEditorRef.current.innerHTML.trim();
+    return notes.trim();
+  }
+
   function saveNoteAsStandalone() {
-    const plainText = getNotepadPlainText();
-    if (!plainText) return;
+    const html = getNotepadHtmlForSave();
+    if (!html) return;
     const activeTab = notepadTabs.find((t) => t.id === activeTabId);
+    const plainText = getNotepadPlainText();
     const title = (activeTab?.title?.trim() || plainText.split("\n")[0]?.slice(0, 60) || "Untitled").trim();
     const newNote = {
       id: Date.now(),
       title,
-      content: plainText,
+      content: html,
       createdAt: new Date().toISOString(),
     };
     setSavedNotes((prev) => [newNote, ...prev]);
@@ -1233,11 +1299,12 @@ export default function App() {
   function updateLinkedNote() {
     const activeTab = notepadTabs.find((t) => t.id === activeTabId);
     if (!activeTab?.savedNoteId) return;
+    const html = getNotepadHtmlForSave();
     const plainText = getNotepadPlainText();
     const title = (activeTab?.title?.trim() || plainText.split("\n")[0]?.slice(0, 60) || "Untitled").trim();
     setSavedNotes((prev) =>
       prev.map((n) =>
-        n.id === activeTab.savedNoteId ? { ...n, title, content: plainText } : n
+        n.id === activeTab.savedNoteId ? { ...n, title, content: html } : n
       )
     );
   }
@@ -1256,9 +1323,10 @@ export default function App() {
     if (!note || !taskId) return;
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
+    const notePlain = isContentHtml(note.content) ? getPlainTextFromHtml(note.content) : note.content;
     const existingNotesItem = task.checklist?.find((item) => item.label === "Notes");
     if (existingNotesItem) {
-      const appendedDetails = [existingNotesItem.details, note.content].filter(Boolean).join("\n\n");
+      const appendedDetails = [existingNotesItem.details, notePlain].filter(Boolean).join("\n\n");
       setTasks((prev) =>
         prev.map((t) =>
           t.id === taskId
@@ -1276,7 +1344,7 @@ export default function App() {
       const notesItem = {
         id: newItemId,
         label: "Notes",
-        details: note.content,
+        details: notePlain,
         completed: false,
       };
       setTasks((prev) =>
@@ -1502,9 +1570,10 @@ export default function App() {
             <div className="left-notes-header">Notes</div>
             <div className="left-notes-list">
               {savedNotes.map((note) => {
-                const displayTitle = note.title || note.content.split("\n")[0]?.slice(0, 60) || "(Empty)";
+                const displayTitle = getNoteDisplayTitle(note);
                 const isExpanded = expandedNoteId === note.id;
                 const isEditing = editingNoteId === note.id;
+                const contentIsHtml = isContentHtml(note.content);
                 return (
                   <div
                     key={note.id}
@@ -1544,7 +1613,7 @@ export default function App() {
                           onDoubleClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            startRenameNote(note.id, note.title || note.content.split("\n")[0]?.slice(0, 60) || "");
+                            startRenameNote(note.id, note.title || displayTitle);
                           }}
                           role="button"
                           tabIndex={0}
@@ -1563,7 +1632,10 @@ export default function App() {
                       </button>
                     </div>
                     {isExpanded && (
-                      <div className="left-note-content">{note.content}</div>
+                      <div
+                        className="left-note-content"
+                        {...(contentIsHtml ? { dangerouslySetInnerHTML: { __html: note.content } } : { children: note.content })}
+                      />
                     )}
                   </div>
                 );
@@ -1778,6 +1850,11 @@ export default function App() {
                           setNotepadTabs((prev) =>
                             prev.map((t) => (t.id === tab.id ? { ...t, title } : t))
                           );
+                          if (tab.savedNoteId) {
+                            setSavedNotes((prev) =>
+                              prev.map((n) => (n.id === tab.savedNoteId ? { ...n, title } : n))
+                            );
+                          }
                           setEditingTabId(null);
                         }}
                         onKeyDown={(e) => {
@@ -1787,6 +1864,11 @@ export default function App() {
                             setNotepadTabs((prev) =>
                               prev.map((t) => (t.id === tab.id ? { ...t, title } : t))
                             );
+                            if (tab.savedNoteId) {
+                              setSavedNotes((prev) =>
+                                prev.map((n) => (n.id === tab.savedNoteId ? { ...n, title } : n))
+                              );
+                            }
                             setEditingTabId(null);
                           } else if (e.key === "Escape") {
                             setEditingTabId(null);
@@ -1943,6 +2025,14 @@ export default function App() {
               title="Numbered list"
             >
               1.
+            </button>
+            <button
+              type="button"
+              className="notepad-toolbar-btn"
+              onClick={insertNotepadTable}
+              title="Insert table"
+            >
+              ⊞
             </button>
           </div>
           <div className="notepad-action-buttons">

@@ -1521,6 +1521,25 @@ body {
   margin: 0.25em 0;
 }
 
+.notepad-editor table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.notepad-editor td,
+.notepad-editor th {
+  border: 1px solid #dae5ec;
+  padding: 6px 10px;
+  vertical-align: top;
+}
+
+.notepad-editor th {
+  background: #f0f4f7;
+  font-weight: 600;
+}
+
 .notepad-editor .notepad-line-highlight {
   display: block;
   margin: 0 0 0.25em 0;
