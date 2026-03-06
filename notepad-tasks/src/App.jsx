@@ -286,36 +286,7 @@ export default function App() {
     const title = projectBrief.trim().slice(0, 120);
     if (!title) return;
 
-    const briefLower = projectBrief.trim().toLowerCase();
-    const matchingTemplates = templates.filter(
-      (t) => t.name && briefLower.includes(t.name.trim().toLowerCase())
-    );
-    const bestTemplate = matchingTemplates.length > 0
-      ? matchingTemplates.reduce((a, b) => (a.name.length >= b.name.length ? a : b))
-      : null;
-
-    let steps = [];
-    if (bestTemplate && bestTemplate.subtasks && bestTemplate.subtasks.length > 0) {
-      steps = bestTemplate.subtasks.map((s) => ({
-        label: s.label || "Subtask",
-        details: s.detailsPlaceholder || "",
-      }));
-    }
-    if (steps.length === 0) {
-      const result = generateTaskWithChecklist(projectBrief);
-      if (!result) return;
-      steps = result.steps.map((label) => ({ label, details: "" }));
-    }
-
     const newId = getNextTaskId(tasks);
-    const checklistIds = steps.map((_, i) => newId * 100 + i);
-    const checklist = steps.map((step, i) => ({
-      id: checklistIds[i],
-      label: typeof step === "string" ? step : step.label,
-      details: typeof step === "string" ? "" : step.details || "",
-      completed: false,
-    }));
-
     setTasks((prev) => [
       ...prev,
       {
@@ -325,7 +296,6 @@ export default function App() {
         groupId: activeGroupId,
         date: new Date().toISOString().split("T")[0],
         onHold: false,
-        checklist,
       },
     ]);
     setProjectBrief("");
