@@ -48,6 +48,20 @@ export default function App() {
   const [profiles, setProfiles] = useState([]);
   const [activeProfileId, setActiveProfileIdState] = useState(null);
   const [theme, setTheme] = useState("light");
+  const [defaultAddSubtasks, setDefaultAddSubtasks] = useState(false);
+  const [defaultSubtaskTemplate, setDefaultSubtaskTemplate] = useState([
+    "Gather requirements",
+    "Create structure or plan",
+    "Do the main work",
+    "Review and finalize",
+  ]);
+  const [useDefaultDueDate, setUseDefaultDueDate] = useState(false);
+  const [defaultDueDateDelayDays, setDefaultDueDateDelayDays] = useState(0);
+  const [notifications, setNotifications] = useState([]); // { id, type, taskIds?, title, message, createdAt, read }
+  const [toasts, setToasts] = useState([]); // Apple-style pop-ups: { id, title, message, taskId?, type, createdAt }
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+  const [rightPanelDateFilter, setRightPanelDateFilter] = useState("selected"); // 'selected' | 'today' | 'tomorrow'
+  const notificationCenterRef = useRef(null);
   const [templates, setTemplates] = useState([]);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -193,12 +207,28 @@ export default function App() {
       return { start, end };
     }
 
+    if (filter === "All tasks") {
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      const start = new Date(now);
+      start.setMonth(start.getMonth() - 6);
+      start.setHours(0, 0, 0, 0);
+      return { start, end };
+    }
+
     const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
     const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     return { start, end };
   }
 
   function isTaskInTimeFilter(task) {
+    if (timeFilter === "All tasks") {
+      if (!task.date) return true;
+      const taskDate = new Date(task.date);
+      taskDate.setHours(12, 0, 0, 0);
+      const { start, end } = getDateRangeByFilter("All tasks");
+      return taskDate >= start && taskDate <= end;
+    }
     if (!task.date) return false;
     const taskDate = new Date(task.date);
     taskDate.setHours(12, 0, 0, 0);
@@ -282,11 +312,171 @@ export default function App() {
     return { title, steps };
   }
 
+  const DEFAULT_SUBTASK_LABELS_FALLBACK = [
+    "Gather requirements",
+    "Create structure or plan",
+    "Do the main work",
+    "Review and finalize",
+  ];
+
+  function getDefaultChecklistForTask(taskId) {
+    const labels = defaultSubtaskTemplate.filter((l) => String(l).trim()).length > 0
+      ? defaultSubtaskTemplate.filter((l) => String(l).trim())
+      : DEFAULT_SUBTASK_LABELS_FALLBACK;
+    return labels.map((label, i) => ({
+      id: taskId * 100 + i,
+      label: String(label).trim(),
+      details: "",
+      completed: false,
+    }));
+  }
+
+  function getDefaultDueDate() {
+    if (!useDefaultDueDate) return "";
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() + defaultDueDateDelayDays);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function getNextRecurrenceDate(task) {
+    if (!task.recurrence || task.recurrence.type !== "frequency" || !task.recurrence.frequency) return null;
+    const last = task.recurrence.lastRecurredAt || task.date || "";
+    const base = last ? new Date(last) : new Date();
+    base.setHours(0, 0, 0, 0);
+    const next = new Date(base);
+    switch (task.recurrence.frequency) {
+      case "daily":
+        next.setDate(next.getDate() + 1);
+        break;
+      case "weekly":
+        next.setDate(next.getDate() + 7);
+        break;
+      case "monthly":
+        next.setMonth(next.getMonth() + 1);
+        break;
+      case "yearly":
+        next.setFullYear(next.getFullYear() + 1);
+        break;
+      default:
+        return null;
+    }
+    return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}-${String(next.getDate()).padStart(2, "0")}`;
+  }
+
+  function addNotification(n) {
+    const id = "n_" + Date.now() + "_" + Math.random().toString(36).slice(2, 9);
+    setNotifications((prev) => [{ ...n, id, createdAt: new Date().toISOString(), read: false }, ...prev.slice(0, 99)]);
+  }
+
+  function markNotificationRead(id) {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+  }
+
+  function clearAllNotifications() {
+    setNotifications([]);
+  }
+
+  function processRecurringTasks() {
+    if (!hasLoadedFromStorageRef.current) return;
+    const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`;
+
+    setTasks((prev) => {
+      let next = [...prev];
+      const toAdd = [];
+      prev.forEach((task) => {
+        if (!task.recurrence || task.recurrence.type !== "frequency") return;
+        const nextDate = task.recurrence.lastRecurredAt ? getNextRecurrenceDate(task) : (task.date || getNextRecurrenceDate(task));
+        if (!nextDate || nextDate > todayStr) return;
+        const newId = getNextTaskId(next.concat(toAdd));
+        const occurrenceDate = nextDate;
+        const newTask = {
+          id: newId,
+          text: task.text,
+          completed: false,
+          groupId: task.groupId,
+          date: occurrenceDate,
+          onHold: false,
+          autoCreatedFromRecurrence: true,
+          recurrenceParentId: task.id,
+          checklist: task.checklist?.map((item, i) => ({
+            id: newId * 100 + i,
+            label: item.label,
+            details: "",
+            completed: false,
+          })),
+        };
+        toAdd.push(newTask);
+        next = next.map((t) =>
+          t.id === task.id
+            ? { ...t, recurrence: { ...t.recurrence, lastRecurredAt: occurrenceDate } }
+            : t
+        );
+      });
+      if (toAdd.length > 0) {
+        addNotification({
+          type: "recurring_created",
+          taskIds: toAdd.map((t) => t.id),
+          title: "Recurring tasks created",
+          message: `${toAdd.length} task(s) added from recurring: ${toAdd.map((t) => t.text).join(", ")}`,
+        });
+      }
+      return next.concat(toAdd);
+    });
+  }
+
+  useEffect(() => {
+    if (!hasLoadedFromStorageRef.current) return;
+    const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+    const dueToday = tasks.filter((t) => t.date === todayStr && !t.completed);
+    const dueTomorrow = tasks.filter((t) => t.date === tomorrowStr && !t.completed);
+    const keyToday = "due_today_" + todayStr;
+    const keyTomorrow = "due_tomorrow_" + tomorrowStr;
+    const existing = new Set(notifications.map((n) => n.id));
+    const toastsToAdd = [];
+    if (dueToday.length > 0 && !existing.has(keyToday)) {
+      dueToday.forEach((t) => toastsToAdd.push({ id: `toast_${t.id}_today_${todayStr}_${Date.now()}`, title: "Due today", message: t.text, taskId: t.id, type: "due_today", createdAt: Date.now() }));
+    }
+    if (dueTomorrow.length > 0 && !existing.has(keyTomorrow)) {
+      dueTomorrow.forEach((t) => toastsToAdd.push({ id: `toast_${t.id}_tomorrow_${tomorrowStr}_${Date.now()}`, title: "Due tomorrow", message: t.text, taskId: t.id, type: "due_tomorrow", createdAt: Date.now() }));
+    }
+    if (toastsToAdd.length > 0) {
+      setToasts((prev) => [...prev, ...toastsToAdd].slice(-20));
+    }
+    setNotifications((prev) => {
+      const existingPrev = new Set(prev.map((n) => n.id));
+      const next = [...prev];
+      if (dueToday.length > 0 && !existingPrev.has(keyToday)) {
+        next.unshift({ id: keyToday, type: "due_today", taskIds: dueToday.map((t) => t.id), title: "Tasks due today", message: `${dueToday.length} task(s) due today: ${dueToday.map((t) => t.text).slice(0, 3).join(", ")}${dueToday.length > 3 ? "…" : ""}`, createdAt: new Date().toISOString(), read: false });
+      }
+      if (dueTomorrow.length > 0 && !existingPrev.has(keyTomorrow)) {
+        next.unshift({ id: keyTomorrow, type: "due_tomorrow", taskIds: dueTomorrow.map((t) => t.id), title: "Tasks due tomorrow", message: `${dueTomorrow.length} task(s) due tomorrow (reminder)`, createdAt: new Date().toISOString(), read: false });
+      }
+      return next.slice(0, 100);
+    });
+  }, [tasks]);
+
+  const TOAST_DURATION_MS = 5500;
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setToasts((prev) => prev.filter((toast) => Date.now() - toast.createdAt < TOAST_DURATION_MS));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  function dismissToast(id) {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }
+
   function addBriefAsTaskWithChecklist() {
     const title = projectBrief.trim().slice(0, 120);
     if (!title) return;
 
     const newId = getNextTaskId(tasks);
+    const checklist = defaultAddSubtasks ? getDefaultChecklistForTask(newId) : undefined;
+    const taskDate = getDefaultDueDate();
     setTasks((prev) => [
       ...prev,
       {
@@ -294,10 +484,18 @@ export default function App() {
         text: title,
         completed: false,
         groupId: activeGroupId,
-        date: new Date().toISOString().split("T")[0],
+        date: taskDate,
         onHold: false,
+        ...(checklist ? { checklist } : {}),
       },
     ]);
+    if (defaultAddSubtasks) {
+      setExpandedChecklistTaskIds((prev) => {
+        const next = new Set(prev);
+        next.add(newId);
+        return next;
+      });
+    }
     setProjectBrief("");
   }
 
@@ -428,6 +626,10 @@ export default function App() {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, groupId } : t)));
   }
 
+  function assignTaskRecurrence(id, recurrence) {
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, recurrence } : t)));
+  }
+
   function markSelectedAsDone() {
     setTasks((prev) =>
       prev.map((task) => (selectedTasks.has(task.id) ? { ...task, completed: true } : task))
@@ -490,7 +692,16 @@ export default function App() {
         if (data.projectBrief != null) setProjectBrief(data.projectBrief);
         if (data.savedNotes) setSavedNotes(data.savedNotes);
         if (data.theme) setTheme(data.theme);
+        if (data.defaultAddSubtasks != null) setDefaultAddSubtasks(!!data.defaultAddSubtasks);
+        if (data.defaultSubtaskTemplate && Array.isArray(data.defaultSubtaskTemplate)) {
+          setDefaultSubtaskTemplate(
+            data.defaultSubtaskTemplate.map((s) => (typeof s === "string" ? s : s?.label ?? ""))
+          );
+        }
+        if (data.useDefaultDueDate != null) setUseDefaultDueDate(!!data.useDefaultDueDate);
+        if (data.defaultDueDateDelayDays != null) setDefaultDueDateDelayDays(Number(data.defaultDueDateDelayDays));
         if (data.templates) setTemplates(data.templates);
+        if (data.notifications && Array.isArray(data.notifications)) setNotifications(data.notifications);
         if (data.notepadTabs && data.notepadTabs.length > 0) {
           setNotepadTabs(data.notepadTabs);
           if (data.activeTabId != null) setActiveTabId(data.activeTabId);
@@ -538,6 +749,11 @@ export default function App() {
       notepadTabs: [{ id: 1, title: "Untitled", content: "", savedNoteId: null }],
       activeTabId: 1,
       theme: "light",
+      defaultAddSubtasks: false,
+      defaultSubtaskTemplate: ["Gather requirements", "Create structure or plan", "Do the main work", "Review and finalize"],
+      useDefaultDueDate: false,
+      defaultDueDateDelayDays: 0,
+      notifications: [],
       templates: [],
     }));
   }
@@ -553,7 +769,16 @@ export default function App() {
     if (payload.projectBrief != null) setProjectBrief(payload.projectBrief);
     if (payload.savedNotes) setSavedNotes(payload.savedNotes);
     if (payload.theme) setTheme(payload.theme);
+    if (payload.defaultAddSubtasks != null) setDefaultAddSubtasks(!!payload.defaultAddSubtasks);
+    if (payload.defaultSubtaskTemplate && Array.isArray(payload.defaultSubtaskTemplate)) {
+      setDefaultSubtaskTemplate(
+        payload.defaultSubtaskTemplate.map((s) => (typeof s === "string" ? s : s?.label ?? ""))
+      );
+    }
+    if (payload.useDefaultDueDate != null) setUseDefaultDueDate(!!payload.useDefaultDueDate);
+    if (payload.defaultDueDateDelayDays != null) setDefaultDueDateDelayDays(Number(payload.defaultDueDateDelayDays));
     if (payload.templates) setTemplates(payload.templates);
+    if (payload.notifications && Array.isArray(payload.notifications)) setNotifications(payload.notifications);
     if (payload.notepadTabs?.length) {
       setNotepadTabs(payload.notepadTabs);
       if (payload.activeTabId != null) setActiveTabId(payload.activeTabId);
@@ -625,6 +850,11 @@ export default function App() {
         notepadTabs: [{ id: 1, title: "Untitled", content: oldNotes || "", savedNoteId: null }],
         activeTabId: 1,
         theme: "light",
+        defaultAddSubtasks: false,
+        defaultSubtaskTemplate: ["Gather requirements", "Create structure or plan", "Do the main work", "Review and finalize"],
+        useDefaultDueDate: false,
+        defaultDueDateDelayDays: 0,
+        notifications: [],
         templates: [],
       };
       localStorage.setItem(PROFILE_DATA_PREFIX + "default_v1", JSON.stringify(data));
@@ -638,6 +868,7 @@ export default function App() {
       setTheme("light");
       setTemplates([]);
       hasLoadedFromStorageRef.current = true;
+      setTimeout(processRecurringTasks, 300);
       return;
     }
     setProfiles(savedProfiles);
@@ -651,6 +882,13 @@ export default function App() {
       loadProfileDataIntoState(firstId);
     }
     hasLoadedFromStorageRef.current = true;
+    setTimeout(processRecurringTasks, 300);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedFromStorageRef.current) return;
+    const interval = setInterval(processRecurringTasks, 5 * 60 * 1000);
+    return () => clearInterval(interval);
   }, []);
 
   // Auth state: when logged in, use Supabase data; when logged out, use local
@@ -691,6 +929,11 @@ export default function App() {
       notepadTabs,
       activeTabId,
       theme,
+      defaultAddSubtasks,
+      defaultSubtaskTemplate,
+      useDefaultDueDate,
+      defaultDueDateDelayDays,
+      notifications,
       templates,
     };
     const key = PROFILE_DATA_PREFIX + activeProfileId + "_v1";
@@ -709,6 +952,11 @@ export default function App() {
     notepadTabs,
     activeTabId,
     theme,
+    defaultAddSubtasks,
+    defaultSubtaskTemplate,
+    useDefaultDueDate,
+    defaultDueDateDelayDays,
+    notifications,
     templates,
   ]);
 
@@ -729,6 +977,15 @@ export default function App() {
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [showHighlighterPanel]);
+
+  useEffect(() => {
+    if (!showNotificationCenter) return;
+    const close = (e) => {
+      if (notificationCenterRef.current && !notificationCenterRef.current.contains(e.target)) setShowNotificationCenter(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [showNotificationCenter]);
 
   useEffect(() => {
     const container = calendarViewRef.current;
@@ -827,6 +1084,8 @@ export default function App() {
   function addNewTask() {
     if (newTaskText.trim() === "") return;
     const newId = getNextTaskId(tasks);
+    const checklist = defaultAddSubtasks ? getDefaultChecklistForTask(newId) : undefined;
+    const taskDate = getDefaultDueDate();
     setTasks((prevTasks) => [
       ...prevTasks,
       {
@@ -834,10 +1093,18 @@ export default function App() {
         text: newTaskText,
         completed: false,
         groupId: activeGroupId,
-        date: new Date().toISOString().split("T")[0],
+        date: taskDate,
         onHold: false,
+        ...(checklist ? { checklist } : {}),
       },
     ]);
+    if (defaultAddSubtasks) {
+      setExpandedChecklistTaskIds((prev) => {
+        const next = new Set(prev);
+        next.add(newId);
+        return next;
+      });
+    }
     setNewTaskText("");
   }
 
@@ -858,19 +1125,30 @@ export default function App() {
       .filter(Boolean);
     if (lines.length === 0) return;
 
-    const dateStr = new Date().toISOString().split("T")[0];
     let nextId = getNextTaskId(tasks);
 
-    const newTasks = lines.map((line) => ({
-      id: nextId++,
-      text: line.slice(0, 120),
-      completed: false,
-      groupId: activeGroupId,
-      date: dateStr,
-      onHold: false,
-    }));
+    const taskDate = getDefaultDueDate();
+    const newTasks = lines.map((line) => {
+      const id = nextId++;
+      return {
+        id,
+        text: line.slice(0, 120),
+        completed: false,
+        groupId: activeGroupId,
+        date: taskDate,
+        onHold: false,
+        ...(defaultAddSubtasks ? { checklist: getDefaultChecklistForTask(id) } : {}),
+      };
+    });
 
     setTasks((prevTasks) => [...prevTasks, ...newTasks]);
+    if (defaultAddSubtasks && newTasks.length > 0) {
+      setExpandedChecklistTaskIds((prev) => {
+        const next = new Set(prev);
+        newTasks.forEach((t) => next.add(t.id));
+        return next;
+      });
+    }
     setNotes("");
     if (notepadEditorRef.current) notepadEditorRef.current.innerHTML = "";
   }
@@ -1389,13 +1667,24 @@ export default function App() {
     setTaskDropdown(null);
   }
 
-  // Right panel: pending to-do list shows ALL pending tasks (filtered by group only when a group is selected). Time filter does NOT apply here.
+  // Right panel: pending = tasks with NO due date (unscheduled), not on hold, not completed. Once user sets a due date, task moves to left panel.
   const filteredByGroup = activeGroupId ? tasks.filter((task) => task.groupId === activeGroupId) : tasks;
-  const pendingTasks = filteredByGroup.filter((task) => !task.onHold && !task.completed);
-  // Left panel: This Week / Next Week / Entire Month act as filter only for the left panel task list
+  const hasNoDueDate = (task) => !task.date || String(task.date).trim() === "";
+  const pendingTasks = filteredByGroup.filter((task) => !task.onHold && !task.completed && hasNoDueDate(task));
+  // Tasks due on the calendar selected date (or Due Today / Due Tomorrow filter) — shown below pending in right panel
+  const selectedDateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, "0")}-${String(selectedDate.getDate()).padStart(2, "0")}`;
+  const todayStrForPanel = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(new Date().getDate()).padStart(2, "0")}`;
+  const tomorrowForPanel = new Date();
+  tomorrowForPanel.setDate(tomorrowForPanel.getDate() + 1);
+  const tomorrowStrForPanel = `${tomorrowForPanel.getFullYear()}-${String(tomorrowForPanel.getMonth() + 1).padStart(2, "0")}-${String(tomorrowForPanel.getDate()).padStart(2, "0")}`;
+  const effectiveDateStr = rightPanelDateFilter === "today" ? todayStrForPanel : rightPanelDateFilter === "tomorrow" ? tomorrowStrForPanel : selectedDateStr;
+  const tasksForSelectedDate = filteredByGroup.filter(
+    (task) => task.date === effectiveDateStr && !task.completed
+  );
+  const effectiveDateLabel = rightPanelDateFilter === "today" ? "Today" : rightPanelDateFilter === "tomorrow" ? "Tomorrow" : selectedDate.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  // Left panel: tasks that HAVE a due date, in the selected period (This Week / Next Week / Entire Month / All tasks)
   const leftFilteredByTime = tasks.filter(isTaskInTimeFilter).filter((task) => !task.onHold);
-  const leftCompletedTasks = leftFilteredByTime.filter((task) => task.completed);
-  const leftPanelTasks = leftCompletedTasks;
+  const leftPanelTasks = leftFilteredByTime;
 
   function toggleChecklistExpanded(taskId) {
     setExpandedChecklistTaskIds((prev) => {
@@ -1426,6 +1715,23 @@ export default function App() {
 
   return (
     <div className={`app-container theme-${theme}`}>
+      {/* Apple-style toast pop-ups (one per task due) */}
+      <div className="toast-stack" aria-live="polite">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className="toast-popup"
+            role="alert"
+            onClick={() => { if (toast.taskId) setTaskDetailModalId(toast.taskId); dismissToast(toast.id); }}
+          >
+            <div className="toast-popup-header">
+              <span className="toast-popup-title">{toast.title}</span>
+              <button type="button" className="toast-popup-dismiss" onClick={(e) => { e.stopPropagation(); dismissToast(toast.id); }} aria-label="Dismiss">×</button>
+            </div>
+            <div className="toast-popup-message">{toast.message}</div>
+          </div>
+        ))}
+      </div>
       {/* Profile & Settings entry */}
       <div className="app-top-bar">
         <div className="app-top-bar-left">
@@ -1522,6 +1828,50 @@ export default function App() {
               {profiles.find((p) => String(p.id) === String(activeProfileId))?.name || "Profile"}
             </span>
           ) : null}
+          <div className="top-bar-notification-wrap" ref={notificationCenterRef}>
+            <button
+              type="button"
+              className="top-bar-btn top-bar-notification-btn"
+              onClick={() => setShowNotificationCenter((v) => !v)}
+              title="Notifications"
+              aria-label="Notifications"
+            >
+              <svg className="notification-bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              {notifications.filter((n) => !n.read).length > 0 && (
+                <span className="top-bar-notification-badge">{Math.min(99, notifications.filter((n) => !n.read).length)}</span>
+              )}
+            </button>
+            {showNotificationCenter && (
+              <div className="notification-center-panel">
+                <div className="notification-center-header">
+                  <span>Notifications</span>
+                  {notifications.length > 0 && (
+                    <button type="button" className="notification-center-clear" onClick={clearAllNotifications}>Clear all</button>
+                  )}
+                </div>
+                <div className="notification-center-list">
+                  {notifications.length === 0 ? (
+                    <div className="notification-center-empty">No notifications</div>
+                  ) : (
+                    notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        className={`notification-center-item ${n.read ? "read" : ""}`}
+                        onClick={() => markNotificationRead(n.id)}
+                      >
+                        <div className="notification-center-item-title">{n.title}</div>
+                        <div className="notification-center-item-message">{n.message}</div>
+                        <div className="notification-center-item-time">{n.createdAt ? new Date(n.createdAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" }) : ""}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <div className="app-main">
@@ -1532,6 +1882,7 @@ export default function App() {
           <button className={`filter-btn ${timeFilter === "This Week" ? "active" : ""}`} onClick={() => setTimeFilter("This Week")}>This Week</button>
           <button className={`filter-btn ${timeFilter === "Next Week" ? "active" : ""}`} onClick={() => setTimeFilter("Next Week")}>Next Week</button>
           <button className={`filter-btn ${timeFilter === "Entire Month" ? "active" : ""}`} onClick={() => setTimeFilter("Entire Month")}>Entire Month</button>
+          <button className={`filter-btn ${timeFilter === "All tasks" ? "active" : ""}`} onClick={() => setTimeFilter("All tasks")}>All tasks</button>
         </div>
 
         {/* Saved Notes (standalone) */}
@@ -1616,10 +1967,14 @@ export default function App() {
 
         {/* Tasks List */}
         <div className="left-tasks-section">
-          <div className="left-tasks-header">Completed Tasks</div>
+          <div className="left-tasks-header">
+            {timeFilter === "All tasks" ? "All tasks (last 6 months)" : "Scheduled (by due date)"}
+          </div>
           <div className="left-reflect-list">
           {leftPanelTasks.length === 0 ? (
-            <div className="left-reflect-empty">No tasks in selected period</div>
+            <div className="left-reflect-empty">
+              {timeFilter === "All tasks" ? "No tasks in last 6 months" : "No tasks in selected period"}
+            </div>
           ) : (
             leftPanelTasks.map((task) => {
               const isExpanded = expandedLeftTaskId === task.id;
@@ -2385,6 +2740,78 @@ export default function App() {
               </select>
             </div>
             <div className="settings-section">
+              <label className="settings-label settings-label-checkbox">
+                <input
+                  type="checkbox"
+                  checked={defaultAddSubtasks}
+                  onChange={(e) => setDefaultAddSubtasks(e.target.checked)}
+                />
+                Default Add Subtask
+              </label>
+              <p className="save-note-modal-desc">When on, new tasks get the default subtask template below and the checklist is shown by default. When off, tasks are added as a single item with no subtasks.</p>
+              {defaultAddSubtasks && (
+                <div className="default-subtask-template-editor">
+                  <label className="settings-label">Default task subtasks (editable)</label>
+                  <p className="save-note-modal-desc">Customise the subtask labels used when adding new tasks. Save is automatic.</p>
+                  {defaultSubtaskTemplate.map((label, idx) => (
+                    <div key={idx} className="template-subtask-row">
+                      <input
+                        type="text"
+                        placeholder="Subtask label"
+                        value={label}
+                        onChange={(e) => {
+                          const next = [...defaultSubtaskTemplate];
+                          next[idx] = e.target.value;
+                          setDefaultSubtaskTemplate(next);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="template-remove-subtask"
+                        onClick={() => setDefaultSubtaskTemplate((prev) => prev.filter((_, i) => i !== idx))}
+                        title="Remove row"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="template-add-subtask"
+                    onClick={() => setDefaultSubtaskTemplate((prev) => [...prev, ""])}
+                  >
+                    + Add subtask row
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="settings-section">
+              <label className="settings-label settings-label-checkbox">
+                <input
+                  type="checkbox"
+                  checked={useDefaultDueDate}
+                  onChange={(e) => setUseDefaultDueDate(e.target.checked)}
+                />
+                Default due date for new tasks
+              </label>
+              <p className="save-note-modal-desc">When on, new tasks get a due date = calendar selected date + the days below. When off, new tasks have no due date.</p>
+              {useDefaultDueDate && (
+                <div className="default-due-date-options">
+                  <label className="settings-label">Add days to selected date</label>
+                  <select
+                    className="save-note-task-select"
+                    value={defaultDueDateDelayDays}
+                    onChange={(e) => setDefaultDueDateDelayDays(Number(e.target.value))}
+                  >
+                    <option value={0}>None (use selected date as due date)</option>
+                    {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>{d} {d === 1 ? "day" : "days"}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="settings-section">
               <h4 className="settings-subtitle">Templates</h4>
               <p className="save-note-modal-desc">Define task templates with subtasks. When you add a task and select a template, its subtasks are added automatically.</p>
               {!editingTemplateId ? (
@@ -2625,13 +3052,16 @@ export default function App() {
                             >
                               {task.text}
                             </label>
+                            {task.autoCreatedFromRecurrence && <span className="task-auto-badge" title="Auto-created from recurring task">Auto</span>}
                           </div>
                           <button
-                            className="task-delete-btn"
-                            onClick={() => setTaskDeleteConfirmation(task.id)}
-                            title="Delete task"
+                            type="button"
+                            className="task-add-subtask-btn"
+                            onClick={() => addChecklistItem(task.id)}
+                            title="Add subtask"
+                            aria-label="Add subtask"
                           >
-                            ✕
+                            +
                           </button>
                           <div className="task-dropdown-wrap">
                             <button
@@ -2673,6 +3103,34 @@ export default function App() {
                             ))}
                           </select>
                         </div>
+                        <div className="task-dropdown-item task-dropdown-item-recurrence">
+                          <label>Recurrence:</label>
+                          <div className="task-dropdown-recurrence-selects">
+                            <select
+                              value={task.recurrence?.type === "frequency" ? "repeats" : "once"}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                assignTaskRecurrence(task.id, v === "once" ? null : { type: "frequency", frequency: task.recurrence?.frequency || "weekly" });
+                              }}
+                              className="task-dropdown-select"
+                            >
+                              <option value="once">One-time</option>
+                              <option value="repeats">Repeats</option>
+                            </select>
+                            {task.recurrence?.type === "frequency" && (
+                              <select
+                                value={task.recurrence.frequency || "weekly"}
+                                onChange={(e) => assignTaskRecurrence(task.id, { ...task.recurrence, frequency: e.target.value })}
+                                className="task-dropdown-select"
+                              >
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="monthly">Monthly</option>
+                                <option value="yearly">Yearly</option>
+                              </select>
+                            )}
+                          </div>
+                        </div>
                         <div
                           className="task-dropdown-item task-dropdown-action"
                           onClick={() => {
@@ -2684,6 +3142,13 @@ export default function App() {
                               </div>
                             )}
                           </div>
+                          <button
+                            className="task-delete-btn"
+                            onClick={() => setTaskDeleteConfirmation(task.id)}
+                            title="Delete task"
+                          >
+                            ✕
+                          </button>
                         </>
                       )}
                     </div>
@@ -2769,30 +3234,260 @@ export default function App() {
                                 </div>
                               );
                             })}
-                            <button
-                              type="button"
-                              className="task-checklist-add-btn"
-                              onClick={() => addChecklistItem(task.id)}
-                            >
-                              + Add a Subtask
-                            </button>
                           </div>
                         )}
                       </div>
-                    )}
-                    {(!task.checklist || task.checklist.length === 0) && (
-                      <button
-                        type="button"
-                        className="task-add-subtask-standalone"
-                        onClick={() => addChecklistItem(task.id)}
-                      >
-                        + Add a Subtask
-                      </button>
                     )}
                   </div>
                 </div>
               ))
             )}
+          </div>
+          {/* Tasks due on selected calendar date / Due Today / Due Tomorrow */}
+          <div className="selected-date-tasks-section">
+            <div className="selected-date-tasks-header-row">
+              <span className="selected-date-tasks-header">Due on {effectiveDateLabel}</span>
+              <div className="due-today-tomorrow-btns">
+                <button type="button" className={`due-filter-btn ${rightPanelDateFilter === "today" ? "active" : ""}`} onClick={() => setRightPanelDateFilter("today")} title="Tasks due today">Due Today</button>
+                <button type="button" className={`due-filter-btn ${rightPanelDateFilter === "tomorrow" ? "active" : ""}`} onClick={() => setRightPanelDateFilter("tomorrow")} title="Tasks due tomorrow (reminder)">Due Tomorrow</button>
+                <button type="button" className={`due-filter-btn ${rightPanelDateFilter === "selected" ? "active" : ""}`} onClick={() => setRightPanelDateFilter("selected")} title="Use calendar selected date">Calendar date</button>
+              </div>
+            </div>
+            <div className="task-panel-list selected-date-tasks-list">
+              {tasksForSelectedDate.length === 0 ? (
+                <div className="no-tasks selected-date-no-tasks">No pending or on-hold tasks for this date</div>
+              ) : (
+                tasksForSelectedDate.map((task) => (
+                  <div
+                    key={task.id}
+                    className={`task-panel-item ${task.onHold ? "on-hold-item" : ""}`}
+                    onDoubleClick={() => setTaskDetailModalId(task.id)}
+                  >
+                    <div className="task-content">
+                      <div className="task-main">
+                        <input
+                          type="checkbox"
+                          id={`task-sel-${task.id}`}
+                          checked={task.completed}
+                          onChange={() => toggleTask(task.id)}
+                          className="task-checkbox"
+                        />
+                        {editingId === task.id ? (
+                          <input
+                            type="text"
+                            value={editingText}
+                            onChange={(e) => setEditingText(e.target.value)}
+                            onBlur={() => saveEditTask(task.id)}
+                            onKeyPress={(e) => {
+                              if (e.key === "Enter") saveEditTask(task.id);
+                              if (e.key === "Escape") setEditingId(null);
+                            }}
+                            className="task-edit-input"
+                            autoFocus
+                          />
+                        ) : (
+                          <>
+                            <div className="task-label-wrap">
+                              <label
+                                htmlFor={`task-sel-${task.id}`}
+                                className={`task-label ${task.completed ? "completed" : ""}`}
+                                onDoubleClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  startEditTask(task.id, task.text);
+                                }}
+                              >
+                                {task.text}
+                              </label>
+                              {task.autoCreatedFromRecurrence && <span className="task-auto-badge" title="Auto-created from recurring task">Auto</span>}
+                            </div>
+                            <button
+                              type="button"
+                              className="task-add-subtask-btn"
+                              onClick={() => addChecklistItem(task.id)}
+                              title="Add subtask"
+                              aria-label="Add subtask"
+                            >
+                              +
+                            </button>
+                            <div className="task-dropdown-wrap">
+                              <button
+                                className="task-dropdown-btn"
+                                onClick={() => setTaskDropdown(taskDropdown === task.id ? null : task.id)}
+                                title="Task options"
+                              >
+                                ▼
+                              </button>
+                              {taskDropdown === task.id && (
+                                <div className="task-dropdown-menu">
+                                  <div className="task-dropdown-item">
+                                    <label>Due Date:</label>
+                                    <input
+                                      type="date"
+                                      value={task.date || ""}
+                                      onChange={(e) => {
+                                        assignTaskDate(task.id, e.target.value);
+                                        setTaskDropdown(null);
+                                      }}
+                                      className="task-dropdown-input"
+                                    />
+                                  </div>
+                                  <div className="task-dropdown-item">
+                                    <label>Group:</label>
+                                    <select
+                                      value={task.groupId || ""}
+                                      onChange={(e) => {
+                                        assignTaskGroup(task.id, e.target.value ? parseInt(e.target.value) : null);
+                                        setTaskDropdown(null);
+                                      }}
+                                      className="task-dropdown-select"
+                                    >
+                                      <option value="">No Group</option>
+                                      {groups.map((g) => (
+                                        <option key={g.id} value={g.id}>
+                                          {g.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="task-dropdown-item task-dropdown-item-recurrence">
+                                    <label>Recurrence:</label>
+                                    <div className="task-dropdown-recurrence-selects">
+                                      <select
+                                        value={task.recurrence?.type === "frequency" ? "repeats" : "once"}
+                                        onChange={(e) => {
+                                          const v = e.target.value;
+                                          assignTaskRecurrence(task.id, v === "once" ? null : { type: "frequency", frequency: task.recurrence?.frequency || "weekly" });
+                                        }}
+                                        className="task-dropdown-select"
+                                      >
+                                        <option value="once">One-time</option>
+                                        <option value="repeats">Repeats</option>
+                                      </select>
+                                      {task.recurrence?.type === "frequency" && (
+                                        <select
+                                          value={task.recurrence.frequency || "weekly"}
+                                          onChange={(e) => assignTaskRecurrence(task.id, { ...task.recurrence, frequency: e.target.value })}
+                                          className="task-dropdown-select"
+                                        >
+                                          <option value="daily">Daily</option>
+                                          <option value="weekly">Weekly</option>
+                                          <option value="monthly">Monthly</option>
+                                          <option value="yearly">Yearly</option>
+                                        </select>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div
+                                    className="task-dropdown-item task-dropdown-action"
+                                    onClick={() => toggleTaskOnHold(task.id)}
+                                  >
+                                    {task.onHold ? "Resume task" : "Keep On Hold"}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            <button
+                              className="task-delete-btn"
+                              onClick={() => setTaskDeleteConfirmation(task.id)}
+                              title="Delete task"
+                            >
+                              ✕
+                            </button>
+                          </>
+                        )}
+                      </div>
+                      {task.checklist && task.checklist.length > 0 && (
+                        <div className="task-checklist-wrapper">
+                          <button
+                            type="button"
+                            className="task-checklist-toggle"
+                            onClick={() => toggleChecklistExpanded(task.id)}
+                            aria-expanded={expandedChecklistTaskIds.has(task.id)}
+                          >
+                            <span className="task-checklist-toggle-icon">
+                              {expandedChecklistTaskIds.has(task.id) ? "▼" : "▶"}
+                            </span>
+                            <span>
+                              {expandedChecklistTaskIds.has(task.id)
+                                ? "Hide subtasks"
+                                : `Show subtasks (${task.checklist.length})`}
+                            </span>
+                          </button>
+                          {expandedChecklistTaskIds.has(task.id) && (
+                            <div className="task-checklist">
+                              {task.checklist.map((item) => {
+                                const isEditingLabel = editingChecklistKey === `${task.id}-${item.id}`;
+                                return (
+                                  <div key={item.id} className="task-checklist-item">
+                                    <div className="task-checklist-item-heading">
+                                      <input
+                                        type="checkbox"
+                                        checked={!!item.completed}
+                                        onChange={() => toggleChecklistItemComplete(task.id, item.id)}
+                                        className="task-checkbox task-checklist-checkbox"
+                                      />
+                                      {isEditingLabel ? (
+                                        <input
+                                          type="text"
+                                          value={editingChecklistLabel}
+                                          onChange={(e) => setEditingChecklistLabel(e.target.value)}
+                                          onBlur={() => saveEditChecklistLabel(task.id, item.id)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Enter") saveEditChecklistLabel(task.id, item.id);
+                                            if (e.key === "Escape") {
+                                              setEditingChecklistKey(null);
+                                              setEditingChecklistLabel("");
+                                            }
+                                          }}
+                                          className="task-checklist-label-input"
+                                          autoFocus
+                                          onClick={(e) => e.stopPropagation()}
+                                        />
+                                      ) : (
+                                        <span
+                                          className={`task-checklist-label ${item.completed ? "completed" : ""}`}
+                                          onClick={() => startEditChecklistLabel(task.id, item.id, item.label)}
+                                          title="Click to edit"
+                                        >
+                                          {item.label || "(Untitled)"}
+                                        </span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        className="task-checklist-remove-btn"
+                                        onClick={() => removeChecklistItem(task.id, item.id)}
+                                        title="Remove subtask"
+                                        aria-label="Remove subtask"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={item.details || ""}
+                                      onChange={(e) => updateChecklistItem(task.id, item.id, "details", e.target.value)}
+                                      placeholder="Details... (right-click to expand)"
+                                      className={`task-checklist-details-input ${getChecklistDetailsSize(item.label) === "large" ? "task-checklist-details-input--large" : getChecklistDetailsSize(item.label) === "small" ? "task-checklist-details-input--small" : ""}`}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                      onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        setExpandedTextView({ taskId: task.id, field: "details", itemId: item.id });
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
           {/* On Hold Tasks Section */}
           {onHoldTasks.length > 0 && (
@@ -2817,6 +3512,7 @@ export default function App() {
                         >
                           {task.text}
                         </label>
+                        {task.autoCreatedFromRecurrence && <span className="task-auto-badge" title="Auto-created from recurring task">Auto</span>}
                         <button
                           className="task-delete-btn"
                           onClick={() => setTaskDeleteConfirmation(task.id)}
@@ -2927,6 +3623,38 @@ export default function App() {
                       ))}
                     </select>
                   </div>
+                </div>
+                <div className="task-detail-field task-detail-recurrence">
+                  <label>Recurrence</label>
+                  <div className="task-detail-recurrence-row">
+                    <select
+                      value={task.recurrence?.type === "frequency" ? "repeats" : "once"}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "once") assignTaskRecurrence(task.id, null);
+                        else assignTaskRecurrence(task.id, { type: "frequency", frequency: task.recurrence?.frequency || "weekly" });
+                      }}
+                      className="task-detail-select"
+                    >
+                      <option value="once">One-time (default)</option>
+                      <option value="repeats">Repeats</option>
+                    </select>
+                    {task.recurrence?.type === "frequency" && (
+                      <select
+                        value={task.recurrence.frequency || "weekly"}
+                        onChange={(e) => assignTaskRecurrence(task.id, { ...task.recurrence, frequency: e.target.value })}
+                        className="task-detail-select"
+                      >
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                    )}
+                  </div>
+                  {task.autoCreatedFromRecurrence && (
+                    <p className="task-detail-auto-note">This task was auto-created from a recurring task.</p>
+                  )}
                 </div>
                 {task.checklist && task.checklist.length > 0 && (
                   <div className="task-detail-checklist">

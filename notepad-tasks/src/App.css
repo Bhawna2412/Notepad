@@ -630,6 +630,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 10px;
   flex: 0 0 auto;
   min-width: 80px;
 }
@@ -648,7 +649,221 @@ body {
 .top-bar-btn:hover {
   background: #f0f4f7;
   border-color: #E89F2A;
+}
+.top-bar-notification-wrap {
+  position: relative;
+}
+.top-bar-notification-btn {
+  position: relative;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.notification-bell-icon {
+  width: 20px;
+  height: 20px;
   color: #E89F2A;
+}
+.app-container.theme-dark .notification-bell-icon {
+  color: #dd840a;
+}
+.top-bar-notification-badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  background: #dc2626;
+  color: #fff;
+  border-radius: 8px;
+}
+
+/* Apple-style toast pop-ups (one per task due) */
+.toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 360px;
+  width: 100%;
+  pointer-events: none;
+}
+.toast-stack > * {
+  pointer-events: auto;
+}
+.toast-popup {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 0 1px rgba(0, 0, 0, 0.08);
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.toast-popup:hover {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.16), 0 0 1px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+.toast-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.toast-popup-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+.toast-popup-dismiss {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #86868b;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.toast-popup-dismiss:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #1d1d1f;
+}
+.toast-popup-message {
+  font-size: 13px;
+  color: #424245;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.app-container.theme-dark .toast-popup {
+  background: rgba(28, 28, 30, 0.92);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+.app-container.theme-dark .toast-popup:hover {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+.app-container.theme-dark .toast-popup-title { color: #f5f5f7; }
+.app-container.theme-dark .toast-popup-message { color: #a1a1a6; }
+.app-container.theme-dark .toast-popup-dismiss { color: #86868b; }
+.app-container.theme-dark .toast-popup-dismiss:hover { background: rgba(255, 255, 255, 0.1); color: #f5f5f7; }
+
+.notification-center-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  width: 320px;
+  max-height: 400px;
+  background: #fff;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+.notification-center-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid #eee;
+  font-weight: 600;
+  font-size: 14px;
+}
+.notification-center-clear {
+  font-size: 12px;
+  color: #5a99a8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.notification-center-clear:hover {
+  text-decoration: underline;
+}
+.notification-center-list {
+  overflow-y: auto;
+  max-height: 340px;
+}
+.notification-center-empty {
+  padding: 24px;
+  text-align: center;
+  color: #888;
+  font-size: 13px;
+}
+.notification-center-item {
+  padding: 12px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+.notification-center-item:hover {
+  background: #f8fafc;
+}
+.notification-center-item.read {
+  opacity: 0.75;
+}
+.notification-center-item-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.notification-center-item-message {
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 4px;
+}
+.notification-center-item-time {
+  font-size: 11px;
+  color: #999;
+}
+.app-container.theme-dark .notification-center-panel {
+  background: #141414;
+  border-color: #333;
+}
+.app-container.theme-dark .notification-center-header { border-bottom-color: #333; }
+.app-container.theme-dark .notification-center-item { border-bottom-color: #262626; }
+.app-container.theme-dark .notification-center-item:hover { background: #1a1a1a; }
+.app-container.theme-dark .notification-center-item-title { color: #e5e5e5; }
+.app-container.theme-dark .notification-center-item-message { color: #a1a1a1; }
+.app-container.theme-dark .notification-center-item-time { color: #71717a; }
+.app-container.theme-dark .due-filter-btn {
+  background: #262626;
+  border-color: #333;
+  color: #a1a1aa;
+}
+.app-container.theme-dark .due-filter-btn:hover { background: #333; }
+.app-container.theme-dark .due-filter-btn.active {
+  background: #5a99a8;
+  color: #fff;
+  border-color: #5a99a8;
+}
+.task-detail-recurrence { margin-top: 12px; }
+.task-detail-recurrence-row { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.task-detail-recurrence-row .task-detail-select { flex: 1; }
+.task-detail-auto-note {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 8px;
 }
 
 .app-current-profile {
@@ -2175,6 +2390,36 @@ body {
   color: #e74c3c;
 }
 
+.task-add-subtask-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #E89F2A;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+.task-add-subtask-btn:hover,
+.task-add-subtask-btn:focus {
+  color: #a8c0cc;
+}
+.task-add-subtask-btn:active {
+  color: #8a9aa6;
+}
+.app-container.theme-dark .task-add-subtask-btn {
+  color: #dd840a;
+}
+.app-container.theme-dark .task-add-subtask-btn:hover,
+.app-container.theme-dark .task-add-subtask-btn:focus {
+  color: #94a3b8;
+}
+.app-container.theme-dark .task-add-subtask-btn:active {
+  color: #64748b;
+}
+
 .task-edit-input {
   flex: 1;
   padding: 6px 8px;
@@ -2271,6 +2516,17 @@ body {
   border-color: #E89F2A;
 }
 
+.task-dropdown-item-recurrence {
+  align-items: flex-start;
+}
+.task-dropdown-recurrence-selects {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .task-dropdown-action {
   padding: 8px;
   background: #eff8fa;
@@ -2290,6 +2546,43 @@ body {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid #e8eef5;
+}
+
+.task-checklist-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.task-checklist-header-row .task-checklist-toggle {
+  flex: 1;
+  min-width: 0;
+}
+.task-checklist-toggle-placeholder {
+  flex: 1;
+  font-size: 12px;
+  color: #6b7280;
+  padding: 6px 8px;
+}
+.task-checklist-add-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #dae5ec;
+  background: #f8fafc;
+  border-radius: 6px;
+  font-size: 18px;
+  line-height: 1;
+  color: #4a6b7c;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.task-checklist-add-icon:hover {
+  background: #E89F2A;
+  color: #fff;
+  border-color: #E89F2A;
 }
 
 .task-checklist-toggle {
@@ -2315,6 +2608,18 @@ body {
 .task-checklist-toggle-icon {
   font-size: 10px;
   flex-shrink: 0;
+}
+
+.app-container.theme-dark .task-checklist-toggle-placeholder { color: #94a3b8; }
+.app-container.theme-dark .task-checklist-add-icon {
+  background: #262626;
+  border-color: #404040;
+  color: #e5e5e5;
+}
+.app-container.theme-dark .task-checklist-add-icon:hover {
+  background: #dd840a;
+  color: #000;
+  border-color: #dd840a;
 }
 
 .task-checklist {
@@ -2476,6 +2781,75 @@ body {
   background: #f0f4f7;
   border-color: #E89F2A;
   color: #5a99a8;
+}
+
+.selected-date-tasks-section {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #dae5ec;
+}
+
+.selected-date-tasks-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 5px 10px 5px;
+}
+.selected-date-tasks-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5a99a8;
+  letter-spacing: 0.3px;
+}
+.due-today-tomorrow-btns {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.due-filter-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid #dae5ec;
+  background: #f8fafc;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #4a6b7c;
+}
+.due-filter-btn:hover {
+  background: #e8eef5;
+}
+.due-filter-btn.active {
+  background: #5a99a8;
+  color: #fff;
+  border-color: #5a99a8;
+}
+.task-auto-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: #e0f2fe;
+  color: #0369a1;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+.app-container.theme-dark .task-auto-badge {
+  background: #0c4a6e;
+  color: #7dd3fc;
+}
+
+.selected-date-tasks-list {
+  margin-top: 0;
+}
+
+.selected-date-no-tasks {
+  font-size: 12px;
+  color: #888;
+  padding: 8px 5px;
 }
 
 .on-hold-section {
@@ -2733,6 +3107,16 @@ body {
   color: #4a6b7c;
   margin-bottom: 6px;
 }
+.settings-label-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.settings-label-checkbox input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
 
 .settings-subtitle {
   font-size: 14px;
@@ -2769,6 +3153,18 @@ body {
 .template-delete-btn {
   color: #c53030;
   border-color: #fecaca;
+}
+
+.default-subtask-template-editor,
+.default-due-date-options {
+  margin-top: 12px;
+  padding-left: 4px;
+}
+.default-subtask-template-editor .template-subtask-row {
+  margin-bottom: 6px;
+}
+.default-due-date-options .save-note-task-select {
+  margin-top: 4px;
 }
 
 .template-editor {
@@ -3002,6 +3398,15 @@ body {
 .app-container.theme-dark .left-tasks-header,
 .app-container.theme-dark .left-notes-header,
 .app-container.theme-dark .task-panel-header span,
+.app-container.theme-dark .selected-date-tasks-section {
+  border-top-color: #333;
+}
+.app-container.theme-dark .selected-date-tasks-header {
+  color: #94a3b8;
+}
+.app-container.theme-dark .selected-date-no-tasks {
+  color: #64748b;
+}
 .app-container.theme-dark .on-hold-header {
   color: #a1a1aa;
 }
