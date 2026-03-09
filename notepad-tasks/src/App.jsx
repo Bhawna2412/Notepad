@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import "./App.css";
 import { supabase, isSupabaseConfigured } from "./supabaseClient";
 
@@ -32,6 +32,10 @@ export default function App() {
   const [editingChecklistLabel, setEditingChecklistLabel] = useState("");
   const [taskDetailModalId, setTaskDetailModalId] = useState(null);
   const [expandedTextView, setExpandedTextView] = useState(null); // { taskId, field: 'title' | 'details', itemId? }
+  const [expandedTextShowFormatted, setExpandedTextShowFormatted] = useState(false); // when true, Notes modal shows HTML instead of textarea
+  const [expandedTextEditMode, setExpandedTextEditMode] = useState(false); // true = contenteditable (edit with formatting)
+  const [expandedSavedNoteId, setExpandedSavedNoteId] = useState(null); // open big text area for this saved note
+  const expandedNoteEditorRef = useRef(null); // contenteditable for task/saved note modal
   const [showCalendarPicker, setShowCalendarPicker] = useState(false);
   const [calendarPickerViewDate, setCalendarPickerViewDate] = useState(new Date());
   const [savedNotes, setSavedNotes] = useState([]); // { id, content, createdAt }
@@ -505,9 +509,16 @@ export default function App() {
         if (t.id !== taskId || !t.checklist) return t;
         return {
           ...t,
-          checklist: t.checklist.map((item) =>
-            item.id === itemId ? { ...item, [field]: value } : item
-          ),
+          checklist: t.checklist.map((item) => {
+            if (item.id !== itemId) return item;
+            if (field === "details") {
+              return { ...item, details: value, detailsHtml: value ? plainTextToHtml(value) : "" };
+            }
+            if (field === "detailsHtml") {
+              return { ...item, detailsHtml: value, details: value ? getPlainTextFromHtml(value) : "" };
+            }
+            return { ...item, [field]: value };
+          }),
         };
       })
     );
@@ -1035,6 +1046,42 @@ export default function App() {
     }
   }, [expandedTextView, tasks]);
 
+  useEffect(() => {
+    if (expandedTextView == null) {
+      setExpandedTextShowFormatted(false);
+      setExpandedTextEditMode(false);
+      return;
+    }
+    if (expandedTextView.field !== "details") {
+      setExpandedTextShowFormatted(false);
+      setExpandedTextEditMode(false);
+      return;
+    }
+    const task = tasks.find((t) => t.id === expandedTextView.taskId);
+    const item = task?.checklist?.find((i) => i.id === expandedTextView.itemId);
+    const hasHtml = item?.detailsHtml && isContentHtml(item.detailsHtml);
+    setExpandedTextShowFormatted(!!hasHtml);
+    setExpandedTextEditMode(false);
+  }, [expandedTextView, tasks]);
+
+  useEffect(() => {
+    if (expandedSavedNoteId != null) setExpandedTextEditMode(false);
+  }, [expandedSavedNoteId]);
+
+  useLayoutEffect(() => {
+    if (!expandedTextEditMode) return;
+    const el = expandedNoteEditorRef.current;
+    if (!el) return;
+    if (expandedSavedNoteId != null) {
+      const note = savedNotes.find((n) => n.id === expandedSavedNoteId);
+      el.innerHTML = note ? (note.content || "") : "";
+    } else if (expandedTextView?.field === "details") {
+      const task = tasks.find((t) => t.id === expandedTextView.taskId);
+      const item = task?.checklist?.find((i) => i.id === expandedTextView.itemId);
+      el.innerHTML = item ? (getChecklistItemPreviewHtml(item) || "") : "";
+    }
+  }, [expandedTextEditMode, expandedSavedNoteId, expandedTextView, savedNotes, tasks]);
+
   // Tasks from brief are created only when user presses Enter in the brief input (addBriefAsTaskWithChecklist).
 
   // Toggle task completion
@@ -1425,6 +1472,37 @@ export default function App() {
     return (temp.textContent || temp.innerText || "").trim();
   }
 
+  function getChecklistItemPlainDetails(item) {
+    if (!item) return "";
+    if (item.details) return item.details;
+    if (item.detailsHtml && isContentHtml(item.detailsHtml)) {
+      return getPlainTextFromHtml(item.detailsHtml);
+    }
+    return "";
+  }
+
+  function getChecklistItemPreviewHtml(item) {
+    if (!item) return "";
+    if (item.detailsHtml && isContentHtml(item.detailsHtml)) return item.detailsHtml;
+    if (item.details) return plainTextToHtml(item.details);
+    return "";
+  }
+
+  function appendTaskNoteDetails(item, incomingPlain, incomingHtml, savedNoteId) {
+    const existingPlain = getChecklistItemPlainDetails(item);
+    const existingHtml = item?.detailsHtml && isContentHtml(item.detailsHtml)
+      ? item.detailsHtml
+      : (existingPlain ? plainTextToHtml(existingPlain) : "");
+
+    const next = {
+      ...item,
+      details: [existingPlain, incomingPlain].filter(Boolean).join("\n\n"),
+      detailsHtml: [existingHtml, incomingHtml].filter(Boolean).join("<br><br>"),
+    };
+    if (savedNoteId != null) next.savedNoteId = savedNoteId;
+    return next;
+  }
+
   function switchNotepadTab(tabId) {
     const tab = notepadTabs.find((t) => t.id === tabId);
     if (!tab) return;
@@ -1544,18 +1622,60 @@ export default function App() {
     setSaveNoteModal(false);
   }
 
+  function normalizeForContentMatch(str) {
+    if (!str || typeof str !== "string") return "";
+    return str.replace(/\s+/g, " ").trim();
+  }
+
   function updateLinkedNote() {
     const activeTab = notepadTabs.find((t) => t.id === activeTabId);
     if (!activeTab?.savedNoteId) return;
-    const linkedNoteExists = savedNotes.some((note) => note.id === activeTab.savedNoteId);
-    if (!linkedNoteExists) return;
+    const noteId = activeTab.savedNoteId;
+    const linkedNote = savedNotes.find((n) => n.id === noteId);
+    if (!linkedNote) return;
     const html = getNotepadHtmlForSave();
     const plainText = getNotepadPlainText();
     const title = (activeTab?.title?.trim() || plainText.split("\n")[0]?.slice(0, 60) || "Untitled").trim();
+    const oldHtml = linkedNote.content || "";
+    const oldPlain = isContentHtml(oldHtml) ? getPlainTextFromHtml(oldHtml) : (oldHtml || "");
+    const oldPlainNorm = normalizeForContentMatch(oldPlain);
+
+    const notesItemMatchesNote = (i) => {
+      const label = (i.label || "").trim();
+      if (label !== "Notes") return false;
+      if (i.savedNoteId === noteId) return true;
+      const itemPlain = getChecklistItemPlainDetails(i);
+      const itemPlainNorm = normalizeForContentMatch(itemPlain);
+      if (!oldPlainNorm) return false;
+      if (itemPlainNorm === oldPlainNorm) return true;
+      const prefixLen = Math.min(150, oldPlainNorm.length, itemPlainNorm.length);
+      if (prefixLen >= 20 && itemPlainNorm.slice(0, prefixLen) === oldPlainNorm.slice(0, prefixLen)) return true;
+      if (oldPlainNorm.length > 30 && itemPlainNorm.includes(oldPlainNorm)) return true;
+      if (itemPlainNorm.length > 30 && oldPlainNorm.includes(itemPlainNorm)) return true;
+      if (oldPlainNorm.length >= 50 && itemPlainNorm.includes(oldPlainNorm.slice(0, 50))) return true;
+      const itemHtml = i.detailsHtml && isContentHtml(i.detailsHtml) ? i.detailsHtml : "";
+      if (itemHtml && itemHtml === oldHtml) return true;
+      if (itemPlain && itemPlain === oldPlain) return true;
+      return false;
+    };
+
     setSavedNotes((prev) =>
       prev.map((n) =>
-        n.id === activeTab.savedNoteId ? { ...n, title, content: html } : n
+        n.id === noteId ? { ...n, title, content: html } : n
       )
+    );
+    setTasks((prev) =>
+      prev.map((task) => {
+        if (!task.checklist) return task;
+        const notesItem = task.checklist.find(notesItemMatchesNote);
+        if (!notesItem) return task;
+        const nextChecklist = task.checklist.map((item) =>
+          item.id === notesItem.id
+            ? { ...item, details: plainText, detailsHtml: html, savedNoteId: noteId }
+            : item
+        );
+        return { ...task, checklist: nextChecklist };
+      })
     );
   }
 
@@ -1574,16 +1694,16 @@ export default function App() {
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
     const notePlain = isContentHtml(note.content) ? getPlainTextFromHtml(note.content) : note.content;
+    const noteHtml = isContentHtml(note.content) ? note.content : plainTextToHtml(note.content);
     const existingNotesItem = task.checklist?.find((item) => item.label === "Notes");
     if (existingNotesItem) {
-      const appendedDetails = [existingNotesItem.details, notePlain].filter(Boolean).join("\n\n");
       setTasks((prev) =>
         prev.map((t) =>
           t.id === taskId
             ? {
                 ...t,
                 checklist: t.checklist.map((item) =>
-                  item.id === existingNotesItem.id ? { ...item, details: appendedDetails } : item
+                  item.id === existingNotesItem.id ? appendTaskNoteDetails(item, notePlain, noteHtml, noteId) : item
                 ),
               }
             : t
@@ -1595,7 +1715,9 @@ export default function App() {
         id: newItemId,
         label: "Notes",
         details: notePlain,
+        detailsHtml: noteHtml,
         completed: false,
+        savedNoteId: noteId,
       };
       setTasks((prev) =>
         prev.map((t) =>
@@ -1614,19 +1736,21 @@ export default function App() {
 
   function saveNoteToTask(taskId) {
     const plainText = getNotepadPlainText();
+    const html = getNotepadHtmlForSave();
     if (!plainText) return;
     const task = tasks.find((t) => t.id === taskId);
     if (!task) return;
+    const activeTab = notepadTabs.find((t) => t.id === activeTabId);
+    const linkedNoteId = activeTab?.savedNoteId ?? null;
     const existingNotesItem = task.checklist?.find((item) => item.label === "Notes");
     if (existingNotesItem) {
-      const appendedDetails = [existingNotesItem.details, plainText].filter(Boolean).join("\n\n");
       setTasks((prev) =>
         prev.map((t) =>
           t.id === taskId
             ? {
                 ...t,
                 checklist: t.checklist.map((item) =>
-                  item.id === existingNotesItem.id ? { ...item, details: appendedDetails } : item
+                  item.id === existingNotesItem.id ? appendTaskNoteDetails(item, plainText, html, linkedNoteId) : item
                 ),
               }
             : t
@@ -1638,7 +1762,9 @@ export default function App() {
         id: newItemId,
         label: "Notes",
         details: plainText,
+        detailsHtml: html,
         completed: false,
+        ...(linkedNoteId != null ? { savedNoteId: linkedNoteId } : {}),
       };
       setTasks((prev) =>
         prev.map((t) =>
@@ -1939,7 +2065,7 @@ export default function App() {
                       ) : (
                         <span
                           className="left-note-title"
-                          onClick={() => openNoteInNotepad(note)}
+                          onClick={() => setExpandedSavedNoteId(note.id)}
                           onDoubleClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -1947,7 +2073,7 @@ export default function App() {
                           }}
                           role="button"
                           tabIndex={0}
-                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openNoteInNotepad(note); }}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpandedSavedNoteId(note.id); }}
                         >
                           {displayTitle}{displayTitle.length > 60 ? "…" : ""}
                         </span>
@@ -2032,10 +2158,13 @@ export default function App() {
                           <span className={`left-reflect-subtask-label ${item.completed ? "completed" : ""}`}>
                             {item.label}
                           </span>
-                          {item.details ? (
-                            <span className="left-reflect-subtask-details">{item.details}</span>
+                          {getChecklistItemPlainDetails(item) ? (
+                            <div
+                              className={`left-reflect-subtask-details ${item.detailsHtml ? "left-reflect-subtask-details-rich" : ""}`}
+                              dangerouslySetInnerHTML={{ __html: getChecklistItemPreviewHtml(item) }}
+                            />
                           ) : (
-                            <span className="left-reflect-subtask-details empty">—</span>
+                            <div className="left-reflect-subtask-details empty">—</div>
                           )}
                         </div>
                       ))}
@@ -3227,19 +3356,22 @@ export default function App() {
                                       ✕
                                     </button>
                                   </div>
-                                  <input
-                                    type="text"
-                                    value={item.details || ""}
-                                    onChange={(e) => updateChecklistItem(task.id, item.id, "details", e.target.value)}
-                                    placeholder="Details... (right-click to expand)"
-                                    className={`task-checklist-details-input ${getChecklistDetailsSize(item.label) === "large" ? "task-checklist-details-input--large" : getChecklistDetailsSize(item.label) === "small" ? "task-checklist-details-input--small" : ""}`}
+                                  <div
+                                    className={`task-checklist-details-preview ${getChecklistDetailsSize(item.label) === "large" ? "task-checklist-details-preview--large" : getChecklistDetailsSize(item.label) === "small" ? "task-checklist-details-preview--small" : ""}`}
                                     onClick={(e) => e.stopPropagation()}
                                     onMouseDown={(e) => e.stopPropagation()}
                                     onContextMenu={(e) => {
                                       e.preventDefault();
                                       setExpandedTextView({ taskId: task.id, field: "details", itemId: item.id });
                                     }}
-                                  />
+                                    title="Right-click to expand and edit"
+                                  >
+                                    {getChecklistItemPreviewHtml(item) ? (
+                                      <div className="task-checklist-details-preview-inner" dangerouslySetInnerHTML={{ __html: getChecklistItemPreviewHtml(item) }} />
+                                    ) : (
+                                      <span className="task-checklist-details-preview-placeholder">Details... (right-click to expand)</span>
+                                    )}
+                                  </div>
                                 </div>
                               );
                             })}
@@ -3472,19 +3604,22 @@ export default function App() {
                                         ✕
                                       </button>
                                     </div>
-                                    <input
-                                      type="text"
-                                      value={item.details || ""}
-                                      onChange={(e) => updateChecklistItem(task.id, item.id, "details", e.target.value)}
-                                      placeholder="Details... (right-click to expand)"
-                                      className={`task-checklist-details-input ${getChecklistDetailsSize(item.label) === "large" ? "task-checklist-details-input--large" : getChecklistDetailsSize(item.label) === "small" ? "task-checklist-details-input--small" : ""}`}
+                                    <div
+                                      className={`task-checklist-details-preview ${getChecklistDetailsSize(item.label) === "large" ? "task-checklist-details-preview--large" : getChecklistDetailsSize(item.label) === "small" ? "task-checklist-details-preview--small" : ""}`}
                                       onClick={(e) => e.stopPropagation()}
                                       onMouseDown={(e) => e.stopPropagation()}
                                       onContextMenu={(e) => {
                                         e.preventDefault();
                                         setExpandedTextView({ taskId: task.id, field: "details", itemId: item.id });
                                       }}
-                                    />
+                                      title="Right-click to expand and edit"
+                                    >
+                                      {getChecklistItemPreviewHtml(item) ? (
+                                        <div className="task-checklist-details-preview-inner" dangerouslySetInnerHTML={{ __html: getChecklistItemPreviewHtml(item) }} />
+                                      ) : (
+                                        <span className="task-checklist-details-preview-placeholder">Details... (right-click to expand)</span>
+                                      )}
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -3732,7 +3867,7 @@ export default function App() {
         );
       })()}
 
-      {/* Expanded text view - double width, simple editable text with scroll (for title + all subtask details) */}
+      {/* Expanded text view - task note: View (formatted), Edit (contenteditable), Save = save & close, Cross = discard & close */}
       {expandedTextView !== null && (() => {
         const task = tasks.find((t) => t.id === expandedTextView.taskId);
         if (!task) return null;
@@ -3742,6 +3877,37 @@ export default function App() {
           : null;
         const label = isTitle ? "Task title" : (item?.label || "Details");
         const value = isTitle ? task.text : (item?.details ?? "");
+        const showFormatted = !isTitle && expandedTextShowFormatted && item && getChecklistItemPreviewHtml(item);
+        const isEditingWithFormat = !isTitle && expandedTextEditMode;
+        const onSave = () => {
+          if (isTitle) {
+            setExpandedTextView(null);
+            return;
+          }
+          if (isEditingWithFormat && item && expandedNoteEditorRef.current) {
+            const html = expandedNoteEditorRef.current.innerHTML.trim();
+            updateChecklistItem(task.id, item.id, "detailsHtml", html || "");
+          }
+          setExpandedTextView(null);
+          setExpandedTextEditMode(false);
+        };
+        const onClose = () => {
+          setExpandedTextView(null);
+          setExpandedTextEditMode(false);
+        };
+        const onOpenInNotepad = () => {
+          if (!item) return;
+          const html = expandedTextEditMode && expandedNoteEditorRef.current
+            ? expandedNoteEditorRef.current.innerHTML.trim()
+            : getChecklistItemPreviewHtml(item);
+          setNotepadTabs((prev) =>
+            prev.map((t) => (t.id === activeTabId ? { ...t, content: html || "" } : t))
+          );
+          setNotes(html || "");
+          notepadInitializedRef.current = false;
+          if (notepadEditorRef.current) notepadEditorRef.current.innerHTML = html || "";
+          onClose();
+        };
         const onChange = (newValue) => {
           if (isTitle) {
             setTasks((prev) =>
@@ -3754,7 +3920,7 @@ export default function App() {
         return (
           <div
             className="expanded-text-overlay"
-            onClick={(e) => e.target === e.currentTarget && setExpandedTextView(null)}
+            onClick={(e) => e.target === e.currentTarget && onClose()}
           >
             <div
               className="expanded-text-modal"
@@ -3763,30 +3929,135 @@ export default function App() {
               <div className="expanded-text-header">
                 <h3 className="expanded-text-title">{label}</h3>
                 <div className="expanded-text-header-actions">
-                  <button
-                    type="button"
-                    className="expanded-text-save-btn"
-                    onClick={() => setExpandedTextView(null)}
-                  >
+                  {!isTitle && (
+                    <button
+                      type="button"
+                      className="expanded-text-open-notepad-btn"
+                      onClick={onOpenInNotepad}
+                      title="Open this note in the notepad"
+                    >
+                      Open in Notepad
+                    </button>
+                  )}
+                  {showFormatted && !expandedTextEditMode && (
+                    <button
+                      type="button"
+                      className="expanded-text-edit-btn"
+                      onClick={() => setExpandedTextEditMode(true)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                  <button type="button" className="expanded-text-save-btn" onClick={onSave}>
                     Save
                   </button>
-                  <button
-                    type="button"
-                    className="expanded-text-close"
-                    onClick={() => setExpandedTextView(null)}
-                    aria-label="Close"
-                  >
+                  <button type="button" className="expanded-text-close" onClick={onClose} aria-label="Close without saving" title="Close without saving">
                     ✕
                   </button>
                 </div>
               </div>
-              <textarea
-                className="expanded-text-area"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                placeholder={isTitle ? "Task title..." : "Enter details... (double-click in Task details to open this view for long text)"}
-                autoFocus
-              />
+              {isEditingWithFormat ? (
+                <div
+                  ref={expandedNoteEditorRef}
+                  className="expanded-text-area expanded-text-contenteditable"
+                  contentEditable
+                  suppressContentEditableWarning
+                />
+              ) : showFormatted ? (
+                <div
+                  className="expanded-text-formatted-body"
+                  dangerouslySetInnerHTML={{ __html: getChecklistItemPreviewHtml(item) }}
+                />
+              ) : (
+                <textarea
+                  className="expanded-text-area"
+                  value={value}
+                  onChange={(e) => onChange(e.target.value)}
+                  placeholder={isTitle ? "Task title..." : "Enter details... (right-click in task to open this view)"}
+                  autoFocus
+                />
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Expanded saved note - same layout: View / Edit, Save = save & close, Cross = discard & close */}
+      {expandedSavedNoteId != null && (() => {
+        const note = savedNotes.find((n) => n.id === expandedSavedNoteId);
+        if (!note) return null;
+        const label = note.title || getNoteDisplayTitle(note);
+        const hasHtml = note.content && isContentHtml(note.content);
+        const showFormatted = hasHtml && !expandedTextEditMode;
+        const onSave = () => {
+          if (expandedTextEditMode && expandedNoteEditorRef.current) {
+            const html = expandedNoteEditorRef.current.innerHTML.trim();
+            setSavedNotes((prev) =>
+              prev.map((n) => (n.id === expandedSavedNoteId ? { ...n, content: html || "" } : n))
+            );
+          }
+          setExpandedSavedNoteId(null);
+          setExpandedTextEditMode(false);
+        };
+        const onClose = () => {
+          setExpandedSavedNoteId(null);
+          setExpandedTextEditMode(false);
+        };
+        const onOpenInNotepad = () => {
+          openNoteInNotepad(note);
+          onClose();
+        };
+        return (
+          <div
+            className="expanded-text-overlay"
+            onClick={(e) => e.target === e.currentTarget && onClose()}
+          >
+            <div className="expanded-text-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="expanded-text-header">
+                <h3 className="expanded-text-title">{label}</h3>
+                <div className="expanded-text-header-actions">
+                  <button
+                    type="button"
+                    className="expanded-text-open-notepad-btn"
+                    onClick={onOpenInNotepad}
+                    title="Open this note in the notepad"
+                  >
+                    Open in Notepad
+                  </button>
+                  {hasHtml && !expandedTextEditMode && (
+                    <button
+                      type="button"
+                      className="expanded-text-edit-btn"
+                      onClick={() => setExpandedTextEditMode(true)}
+                    >
+                      Edit
+                    </button>
+                  )}
+                  <button type="button" className="expanded-text-save-btn" onClick={onSave}>
+                    Save
+                  </button>
+                  <button type="button" className="expanded-text-close" onClick={onClose} aria-label="Close without saving" title="Close without saving">
+                    ✕
+                  </button>
+                </div>
+              </div>
+              {expandedTextEditMode ? (
+                <div
+                  ref={expandedNoteEditorRef}
+                  className="expanded-text-area expanded-text-contenteditable"
+                  contentEditable
+                  suppressContentEditableWarning
+                />
+              ) : showFormatted ? (
+                <div
+                  className="expanded-text-formatted-body"
+                  dangerouslySetInnerHTML={{ __html: note.content }}
+                />
+              ) : (
+                <div className="expanded-text-formatted-body">
+                  {note.content}
+                </div>
+              )}
             </div>
           </div>
         );

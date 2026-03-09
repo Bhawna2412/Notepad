@@ -474,6 +474,97 @@ body {
   color: #a8c0cc;
 }
 
+.expanded-text-contenteditable {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.expanded-text-contenteditable ul,
+.expanded-text-contenteditable ol {
+  padding-left: 24px;
+  margin: 0 0 10px;
+}
+.expanded-text-contenteditable table {
+  border-collapse: collapse;
+  margin: 0 0 10px;
+}
+.expanded-text-contenteditable td,
+.expanded-text-contenteditable th {
+  border: 1px solid #dbe5ec;
+  padding: 8px 10px;
+}
+.expanded-text-contenteditable mark {
+  background: #fef08a;
+  padding: 0 2px;
+}
+
+.expanded-text-open-notepad-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5a7b8c;
+  background: transparent;
+  border: 1px solid #dbe5ec;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-right: 8px;
+}
+.expanded-text-open-notepad-btn:hover {
+  background: #f0f4f7;
+  border-color: #E89F2A;
+  color: #E89F2A;
+}
+
+.expanded-text-edit-btn {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #E89F2A;
+  background: transparent;
+  border: 1px solid #E89F2A;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-right: 8px;
+}
+.expanded-text-edit-btn:hover {
+  background: #E89F2A;
+  color: white;
+}
+
+.expanded-text-formatted-body {
+  flex: 1;
+  min-height: 552px;
+  padding: 20px;
+  font-size: 15px;
+  font-family: inherit;
+  line-height: 1.6;
+  color: #2c4a5c;
+  overflow: auto;
+  word-break: break-word;
+}
+.expanded-text-formatted-body p,
+.expanded-text-formatted-body ul,
+.expanded-text-formatted-body ol {
+  margin: 0 0 10px;
+}
+.expanded-text-formatted-body ul,
+.expanded-text-formatted-body ol {
+  padding-left: 24px;
+}
+.expanded-text-formatted-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 10px;
+}
+.expanded-text-formatted-body td,
+.expanded-text-formatted-body th {
+  border: 1px solid #dbe5ec;
+  padding: 8px 10px;
+}
+.expanded-text-formatted-body mark {
+  background: #fef08a;
+  padding: 0 2px;
+}
+
 /* Confirmation Modal */
 .confirmation-overlay {
   position: fixed;
@@ -1209,6 +1300,31 @@ body {
   color: #6b8a9c;
   line-height: 1.4;
   word-break: break-word;
+  white-space: pre-wrap;
+  display: block;
+  width: 100%;
+}
+
+.left-reflect-subtask-details-rich {
+  white-space: normal;
+}
+
+.left-reflect-subtask-details-rich p,
+.left-reflect-subtask-details-rich ul,
+.left-reflect-subtask-details-rich ol,
+.left-reflect-subtask-details-rich table {
+  margin: 0 0 6px;
+}
+
+.left-reflect-subtask-details-rich table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.left-reflect-subtask-details-rich td,
+.left-reflect-subtask-details-rich th {
+  border: 1px solid #dbe5ec;
+  padding: 4px 6px;
 }
 
 .left-reflect-subtask-details.empty {
@@ -2741,6 +2857,70 @@ body {
 
 .task-checklist-details-input--small {
   min-height: 28px;
+}
+
+/* Right panel: formatted notes/details preview (replaces single-line input) */
+.task-checklist-details-preview {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #4a6b7c;
+  background: #f8fbfc;
+  border: 1px solid #e8eef5;
+  border-radius: 4px;
+  min-width: 0;
+  box-sizing: border-box;
+  cursor: text;
+  position: relative;
+  z-index: 1;
+}
+.task-checklist-details-preview--large {
+  min-height: 72px;
+}
+.task-checklist-details-preview--small {
+  min-height: 28px;
+}
+.task-checklist-details-preview-inner {
+  line-height: 1.4;
+  word-break: break-word;
+  white-space: normal;
+}
+.task-checklist-details-preview-inner p,
+.task-checklist-details-preview-inner ul,
+.task-checklist-details-preview-inner ol {
+  margin: 0 0 6px;
+}
+.task-checklist-details-preview-inner ul,
+.task-checklist-details-preview-inner ol {
+  padding-left: 18px;
+}
+.task-checklist-details-preview-inner table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 6px;
+}
+.task-checklist-details-preview-inner td,
+.task-checklist-details-preview-inner th {
+  border: 1px solid #dbe5ec;
+  padding: 4px 6px;
+}
+.task-checklist-details-preview-placeholder {
+  color: #a8c0cc;
+  font-style: italic;
+}
+.app-container.theme-dark .task-checklist-details-preview {
+  background: #262626;
+  border-color: #404040;
+  color: #e5e5e5;
+}
+.app-container.theme-dark .task-checklist-details-preview-inner td,
+.app-container.theme-dark .task-checklist-details-preview-inner th {
+  border-color: #404040;
+}
+.app-container.theme-dark .task-checklist-details-preview-placeholder {
+  color: #64748b;
 }
 
 .task-checklist-add-btn {
