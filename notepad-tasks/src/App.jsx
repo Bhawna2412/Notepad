@@ -1627,6 +1627,40 @@ export default function App() {
     return str.replace(/\s+/g, " ").trim();
   }
 
+  /** Update all task Notes items linked to this saved note (savedNoteId === noteId). */
+  function updateTaskNotesWithSavedNoteContent(noteId, plainText, html) {
+    setTasks((prev) =>
+      prev.map((task) => {
+        if (!task.checklist) return task;
+        const notesItem = task.checklist.find((i) => i.label === "Notes" && i.savedNoteId === noteId);
+        if (!notesItem) return task;
+        return {
+          ...task,
+          checklist: task.checklist.map((item) =>
+            item.id === notesItem.id ? { ...item, details: plainText, detailsHtml: html } : item
+          ),
+        };
+      })
+    );
+  }
+
+  /** Push note content to saved note (left panel) and to any notepad tab showing this note. */
+  function syncNoteContentToSavedNoteAndNotepad(noteId, html) {
+    const plainText = html ? getPlainTextFromHtml(html) : "";
+    setSavedNotes((prev) =>
+      prev.map((n) => (n.id === noteId ? { ...n, content: html || "" } : n))
+    );
+    setNotepadTabs((prev) =>
+      prev.map((t) => (t.savedNoteId === noteId ? { ...t, content: html || "" } : t))
+    );
+    const activeTab = notepadTabs.find((t) => t.id === activeTabId);
+    if (activeTab?.savedNoteId === noteId) {
+      setNotes(html || "");
+      notepadInitializedRef.current = false;
+      if (notepadEditorRef.current) notepadEditorRef.current.innerHTML = html || "";
+    }
+  }
+
   function updateLinkedNote() {
     const activeTab = notepadTabs.find((t) => t.id === activeTabId);
     if (!activeTab?.savedNoteId) return;
@@ -3401,232 +3435,19 @@ export default function App() {
                 tasksForSelectedDate.map((task) => (
                   <div
                     key={task.id}
-                    className={`task-panel-item ${task.onHold ? "on-hold-item" : ""}`}
+                    className={`task-panel-item selected-date-display-only ${task.onHold ? "on-hold-item" : ""}`}
                     onDoubleClick={() => setTaskDetailModalId(task.id)}
+                    title="Double-click to open task details"
                   >
                     <div className="task-content">
-                      <div className="task-main">
-                        <input
-                          type="checkbox"
-                          id={`task-sel-${task.id}`}
-                          checked={task.completed}
-                          onChange={() => toggleTask(task.id)}
-                          className="task-checkbox"
-                        />
-                        {editingId === task.id ? (
-                          <input
-                            type="text"
-                            value={editingText}
-                            onChange={(e) => setEditingText(e.target.value)}
-                            onBlur={() => saveEditTask(task.id)}
-                            onKeyPress={(e) => {
-                              if (e.key === "Enter") saveEditTask(task.id);
-                              if (e.key === "Escape") setEditingId(null);
-                            }}
-                            className="task-edit-input"
-                            autoFocus
-                          />
-                        ) : (
-                          <>
-                            <div className="task-label-wrap">
-                              <label
-                                htmlFor={`task-sel-${task.id}`}
-                                className={`task-label ${task.completed ? "completed" : ""}`}
-                                onDoubleClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  startEditTask(task.id, task.text);
-                                }}
-                              >
-                                {task.text}
-                              </label>
-                              {task.autoCreatedFromRecurrence && <span className="task-auto-badge" title="Auto-created from recurring task">Auto</span>}
-                            </div>
-                            <button
-                              type="button"
-                              className="task-add-subtask-btn"
-                              onClick={() => addChecklistItem(task.id)}
-                              title="Add subtask"
-                              aria-label="Add subtask"
-                            >
-                              +
-                            </button>
-                            <div className="task-dropdown-wrap">
-                              <button
-                                className="task-dropdown-btn"
-                                onClick={() => setTaskDropdown(taskDropdown === task.id ? null : task.id)}
-                                title="Task options"
-                              >
-                                ▼
-                              </button>
-                              {taskDropdown === task.id && (
-                                <div className="task-dropdown-menu">
-                                  <div className="task-dropdown-item">
-                                    <label>Due Date:</label>
-                                    <input
-                                      type="date"
-                                      value={task.date || ""}
-                                      onChange={(e) => {
-                                        assignTaskDate(task.id, e.target.value);
-                                        setTaskDropdown(null);
-                                      }}
-                                      className="task-dropdown-input"
-                                    />
-                                  </div>
-                                  <div className="task-dropdown-item">
-                                    <label>Group:</label>
-                                    <select
-                                      value={task.groupId || ""}
-                                      onChange={(e) => {
-                                        assignTaskGroup(task.id, e.target.value ? parseInt(e.target.value) : null);
-                                        setTaskDropdown(null);
-                                      }}
-                                      className="task-dropdown-select"
-                                    >
-                                      <option value="">No Group</option>
-                                      {groups.map((g) => (
-                                        <option key={g.id} value={g.id}>
-                                          {g.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div className="task-dropdown-item task-dropdown-item-recurrence">
-                                    <label>Recurrence:</label>
-                                    <div className="task-dropdown-recurrence-selects">
-                                      <select
-                                        value={task.recurrence?.type === "frequency" ? "repeats" : "once"}
-                                        onChange={(e) => {
-                                          const v = e.target.value;
-                                          assignTaskRecurrence(task.id, v === "once" ? null : { type: "frequency", frequency: task.recurrence?.frequency || "weekly" });
-                                        }}
-                                        className="task-dropdown-select"
-                                      >
-                                        <option value="once">One-time</option>
-                                        <option value="repeats">Repeats</option>
-                                      </select>
-                                      {task.recurrence?.type === "frequency" && (
-                                        <select
-                                          value={task.recurrence.frequency || "weekly"}
-                                          onChange={(e) => assignTaskRecurrence(task.id, { ...task.recurrence, frequency: e.target.value })}
-                                          className="task-dropdown-select"
-                                        >
-                                          <option value="daily">Daily</option>
-                                          <option value="weekly">Weekly</option>
-                                          <option value="monthly">Monthly</option>
-                                          <option value="yearly">Yearly</option>
-                                        </select>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div
-                                    className="task-dropdown-item task-dropdown-action"
-                                    onClick={() => toggleTaskOnHold(task.id)}
-                                  >
-                                    {task.onHold ? "Resume task" : "Keep On Hold"}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            <button
-                              className="task-delete-btn"
-                              onClick={() => setTaskDeleteConfirmation(task.id)}
-                              title="Delete task"
-                            >
-                              ✕
-                            </button>
-                          </>
+                      <div className="task-main task-main-display-only">
+                        <span className="task-label-display">{task.text}</span>
+                        {task.autoCreatedFromRecurrence && <span className="task-auto-badge" title="Auto-created from recurring task">Auto</span>}
+                        {task.onHold && <span className="task-on-hold-badge">On hold</span>}
+                        {task.checklist && task.checklist.length > 0 && (
+                          <span className="task-subtask-count">({task.checklist.length})</span>
                         )}
                       </div>
-                      {task.checklist && task.checklist.length > 0 && (
-                        <div className="task-checklist-wrapper">
-                          <button
-                            type="button"
-                            className="task-checklist-toggle"
-                            onClick={() => toggleChecklistExpanded(task.id)}
-                            aria-expanded={expandedChecklistTaskIds.has(task.id)}
-                          >
-                            <span className="task-checklist-toggle-icon">
-                              {expandedChecklistTaskIds.has(task.id) ? "▼" : "▶"}
-                            </span>
-                            <span>
-                              {expandedChecklistTaskIds.has(task.id)
-                                ? "Hide subtasks"
-                                : `Show subtasks (${task.checklist.length})`}
-                            </span>
-                          </button>
-                          {expandedChecklistTaskIds.has(task.id) && (
-                            <div className="task-checklist">
-                              {task.checklist.map((item) => {
-                                const isEditingLabel = editingChecklistKey === `${task.id}-${item.id}`;
-                                return (
-                                  <div key={item.id} className="task-checklist-item">
-                                    <div className="task-checklist-item-heading">
-                                      <input
-                                        type="checkbox"
-                                        checked={!!item.completed}
-                                        onChange={() => toggleChecklistItemComplete(task.id, item.id)}
-                                        className="task-checkbox task-checklist-checkbox"
-                                      />
-                                      {isEditingLabel ? (
-                                        <input
-                                          type="text"
-                                          value={editingChecklistLabel}
-                                          onChange={(e) => setEditingChecklistLabel(e.target.value)}
-                                          onBlur={() => saveEditChecklistLabel(task.id, item.id)}
-                                          onKeyDown={(e) => {
-                                            if (e.key === "Enter") saveEditChecklistLabel(task.id, item.id);
-                                            if (e.key === "Escape") {
-                                              setEditingChecklistKey(null);
-                                              setEditingChecklistLabel("");
-                                            }
-                                          }}
-                                          className="task-checklist-label-input"
-                                          autoFocus
-                                          onClick={(e) => e.stopPropagation()}
-                                        />
-                                      ) : (
-                                        <span
-                                          className={`task-checklist-label ${item.completed ? "completed" : ""}`}
-                                          onClick={() => startEditChecklistLabel(task.id, item.id, item.label)}
-                                          title="Click to edit"
-                                        >
-                                          {item.label || "(Untitled)"}
-                                        </span>
-                                      )}
-                                      <button
-                                        type="button"
-                                        className="task-checklist-remove-btn"
-                                        onClick={() => removeChecklistItem(task.id, item.id)}
-                                        title="Remove subtask"
-                                        aria-label="Remove subtask"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
-                                    <div
-                                      className={`task-checklist-details-preview ${getChecklistDetailsSize(item.label) === "large" ? "task-checklist-details-preview--large" : getChecklistDetailsSize(item.label) === "small" ? "task-checklist-details-preview--small" : ""}`}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onMouseDown={(e) => e.stopPropagation()}
-                                      onContextMenu={(e) => {
-                                        e.preventDefault();
-                                        setExpandedTextView({ taskId: task.id, field: "details", itemId: item.id });
-                                      }}
-                                      title="Right-click to expand and edit"
-                                    >
-                                      {getChecklistItemPreviewHtml(item) ? (
-                                        <div className="task-checklist-details-preview-inner" dangerouslySetInnerHTML={{ __html: getChecklistItemPreviewHtml(item) }} />
-                                      ) : (
-                                        <span className="task-checklist-details-preview-placeholder">Details... (right-click to expand)</span>
-                                      )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
                 ))
@@ -3848,6 +3669,11 @@ export default function App() {
                           onChange={(e) =>
                             updateChecklistItem(task.id, item.id, "details", e.target.value)
                           }
+                          onBlur={(e) => {
+                            if (item.savedNoteId && (e.target.value || "").trim()) {
+                              syncNoteContentToSavedNoteAndNotepad(item.savedNoteId, plainTextToHtml(e.target.value));
+                            }
+                          }}
                           onContextMenu={(e) => {
                             e.preventDefault();
                             setExpandedTextView({ taskId: task.id, field: "details", itemId: item.id });
@@ -3887,6 +3713,10 @@ export default function App() {
           if (isEditingWithFormat && item && expandedNoteEditorRef.current) {
             const html = expandedNoteEditorRef.current.innerHTML.trim();
             updateChecklistItem(task.id, item.id, "detailsHtml", html || "");
+            if (item.savedNoteId) syncNoteContentToSavedNoteAndNotepad(item.savedNoteId, html || "");
+          } else if (!isTitle && item?.savedNoteId) {
+            const html = getChecklistItemPreviewHtml(item);
+            if (html) syncNoteContentToSavedNoteAndNotepad(item.savedNoteId, html);
           }
           setExpandedTextView(null);
           setExpandedTextEditMode(false);
@@ -3992,9 +3822,12 @@ export default function App() {
         const onSave = () => {
           if (expandedTextEditMode && expandedNoteEditorRef.current) {
             const html = expandedNoteEditorRef.current.innerHTML.trim();
+            const noteId = expandedSavedNoteId;
             setSavedNotes((prev) =>
-              prev.map((n) => (n.id === expandedSavedNoteId ? { ...n, content: html || "" } : n))
+              prev.map((n) => (n.id === noteId ? { ...n, content: html || "" } : n))
             );
+            updateTaskNotesWithSavedNoteContent(noteId, getPlainTextFromHtml(html), html || "");
+            syncNoteContentToSavedNoteAndNotepad(noteId, html || "");
           }
           setExpandedSavedNoteId(null);
           setExpandedTextEditMode(false);

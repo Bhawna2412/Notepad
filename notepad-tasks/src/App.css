@@ -3032,6 +3032,43 @@ body {
   padding: 8px 5px;
 }
 
+/* Due on [date]: read-only filtered display — no checkboxes or actions */
+.task-panel-item.selected-date-display-only {
+  cursor: pointer;
+}
+.task-panel-item.selected-date-display-only:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+.task-main-display-only {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 28px;
+}
+.task-label-display {
+  font-size: 13px;
+  color: #4a6b7c;
+  flex: 1;
+  min-width: 0;
+}
+.task-panel-item.selected-date-display-only.on-hold-item .task-label-display {
+  color: #6b8a9c;
+  font-style: italic;
+}
+.task-on-hold-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #E89F2A;
+  background: rgba(232, 159, 42, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.task-subtask-count {
+  font-size: 11px;
+  color: #888;
+}
+
 .on-hold-section {
   margin-top: 15px;
   padding-top: 15px;
@@ -3585,6 +3622,18 @@ body {
   color: #94a3b8;
 }
 .app-container.theme-dark .selected-date-no-tasks {
+  color: #64748b;
+}
+.app-container.theme-dark .task-panel-item.selected-date-display-only:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.app-container.theme-dark .task-label-display {
+  color: #e5e5e5;
+}
+.app-container.theme-dark .task-panel-item.selected-date-display-only.on-hold-item .task-label-display {
+  color: #94a3b8;
+}
+.app-container.theme-dark .task-subtask-count {
   color: #64748b;
 }
 .app-container.theme-dark .on-hold-header {
