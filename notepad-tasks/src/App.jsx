@@ -1547,6 +1547,8 @@ export default function App() {
   function updateLinkedNote() {
     const activeTab = notepadTabs.find((t) => t.id === activeTabId);
     if (!activeTab?.savedNoteId) return;
+    const linkedNoteExists = savedNotes.some((note) => note.id === activeTab.savedNoteId);
+    if (!linkedNoteExists) return;
     const html = getNotepadHtmlForSave();
     const plainText = getNotepadPlainText();
     const title = (activeTab?.title?.trim() || plainText.split("\n")[0]?.slice(0, 60) || "Untitled").trim();
@@ -1658,6 +1660,9 @@ export default function App() {
 
   function deleteSavedNote(id) {
     setSavedNotes((prev) => prev.filter((n) => n.id !== id));
+    setNotepadTabs((prev) =>
+      prev.map((tab) => (tab.savedNoteId === id ? { ...tab, savedNoteId: null } : tab))
+    );
     if (expandedNoteId === id) setExpandedNoteId(null);
   }
 
@@ -1685,6 +1690,10 @@ export default function App() {
   // Left panel: tasks that HAVE a due date, in the selected period (This Week / Next Week / Entire Month / All tasks)
   const leftFilteredByTime = tasks.filter(isTaskInTimeFilter).filter((task) => !task.onHold);
   const leftPanelTasks = leftFilteredByTime;
+  const activeTab = notepadTabs.find((tab) => tab.id === activeTabId);
+  const activeTabHasSavedNote = !!(
+    activeTab?.savedNoteId && savedNotes.some((note) => note.id === activeTab.savedNoteId)
+  );
 
   function toggleChecklistExpanded(taskId) {
     setExpandedChecklistTaskIds((prev) => {
@@ -2361,9 +2370,9 @@ export default function App() {
             </button>
           </div>
           <div className="notepad-action-buttons">
-            {notepadTabs.find((t) => t.id === activeTabId)?.savedNoteId ? (
+            {activeTabHasSavedNote ? (
               <button className="save-as-notes-btn update-note-btn" onClick={updateLinkedNote}>
-                Update note
+                Update notes
               </button>
             ) : (
               <button
